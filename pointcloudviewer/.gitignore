@@ -1,0 +1,36 @@
+# Node/Electron build
+.webpack/
+node_modules/
+package-lock.json
+
+# Cache
+.DS_Store
+__pycache__/
+.pytest_cache/
+*.pyc
+
+# Tests
+backend/tests/
+
+# Logs
+*.logs
+*.log
+
+# Scene data
+sceneCOLMAP/
+sceneUH
+sceneCOLMAP.zip
+sceneUH.zip
+
+backend/example_scene
+backend/mask_cache
+
+# Models
+*.pt
+
+# Summary
+repomix-output.xml
+
+# Backend
+backend/segment-anything-2
+backend/dummy_segmentation

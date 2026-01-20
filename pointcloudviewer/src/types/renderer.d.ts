@@ -45,6 +45,14 @@ interface SceneGraph {
   nodes: SceneGraphNode[];
 }
 
+// Add this interface
+interface SegmentationPolygon {
+  label: string;
+  points: { x: number; y: number; z: number }[];
+  area: number;
+  confidence: number;
+}
+
 interface ChatResponse {
   message?: string;
   content?: string;
@@ -53,14 +61,13 @@ interface ChatResponse {
     type: string;
     action: string;
     params?: Record<string, unknown>;
+    polygons?: SegmentationPolygon[];
   };
 }
 
 interface ElectronAPI {
   openDirectory: () => Promise<string | null>;
   openGLBFile: () => Promise<string | null>;
-  openPCDFile: () => Promise<string | null>;
-  openPLYFile: () => Promise<string | null>;
   readDirectory: (dirPath: string) => Promise<FileInfo[]>;
   getFileStats: (filePath: string) => Promise<FileStats | null>;
   checkSceneFolder: (dirPath: string) => Promise<boolean>;
@@ -72,6 +79,10 @@ interface ElectronAPI {
   getSceneImages: (scenePath: string) => Promise<string[] | null>;
   getSceneGraphPath: (scenePath: string) => Promise<string | null>;
   readSceneGraph: (sceneGraphPath: string) => Promise<SceneGraph | null>;
+  getSceneMetadata: (scenePath: string) => Promise<any | null>;
+  readFileBuffer: (filePath: string) => Promise<ArrayBuffer | null>;
+  getAppPath: () => Promise<string>;
+  pathJoin: (...parts: string[]) => Promise<string>;
   sendChatMessage: (message: string, endpoint?: string) => Promise<ChatResponse>;
 }
 

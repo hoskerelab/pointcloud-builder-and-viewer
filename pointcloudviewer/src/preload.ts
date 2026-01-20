@@ -3,6 +3,24 @@
 
 import { contextBridge, ipcRenderer } from 'electron';
 
+// --- ADD THIS BLOCK AT THE TOP ---
+console.log('--- [PRELOAD SCRIPT] EXECUTING ---');
+try {
+  console.log(`[Preload] typeof __dirname: ${typeof __dirname}`);
+  console.log(`[Preload] __dirname: ${__dirname}`);
+  console.log(`[Preload] typeof __filename: ${typeof __filename}`);
+  console.log(`[Preload] __filename: ${__filename}`);
+  console.log(`[Preload] typeof process: ${typeof process}`);
+  console.log(`[Preload] process.versions.node: ${process.versions.node}`);
+  console.log(`[Preload] typeof contextBridge: ${typeof contextBridge}`);
+} catch (e) {
+  console.error('[Preload] Error accessing globals:', e);
+}
+// --- END BLOCK ---
+
+// More debug
+console.log('[Preload] executed, location.href =', window.location.href);
+
 export interface FileInfo {
   name: string;
   path: string;
@@ -28,12 +46,6 @@ contextBridge.exposeInMainWorld('electron', {
 
   openGLBFile: (): Promise<string | null> =>
     ipcRenderer.invoke('dialog:openGLBFile'),
-
-  openPCDFile: (): Promise<string | null> =>
-    ipcRenderer.invoke('dialog:openPCDFile'),
-
-  openPLYFile: (): Promise<string | null> =>
-    ipcRenderer.invoke('dialog:openPLYFile'),
 
   readDirectory: (dirPath: string): Promise<FileInfo[]> =>
     ipcRenderer.invoke('fs:readDirectory', dirPath),
@@ -67,6 +79,18 @@ contextBridge.exposeInMainWorld('electron', {
 
   readSceneGraph: (sceneGraphPath: string): Promise<any | null> =>
     ipcRenderer.invoke('fs:readSceneGraph', sceneGraphPath),
+  
+  getSceneMetadata: (scenePath: string): Promise<any | null> =>
+    ipcRenderer.invoke('fs:getSceneMetadata', scenePath),
+
+  readFileBuffer: (filePath: string): Promise<ArrayBuffer | null> =>
+    ipcRenderer.invoke('fs:readFileBuffer', filePath),
+
+  getAppPath: (): Promise<string> =>
+    ipcRenderer.invoke('app:getPath'),
+
+  pathJoin: (...parts: string[]): Promise<string> =>
+    ipcRenderer.invoke('path:join', parts),
 
   // Chat API
   sendChatMessage: (message: string, endpoint?: string): Promise<any> =>

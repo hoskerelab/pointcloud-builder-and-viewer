@@ -16,7 +16,7 @@ export interface ChatMessage {
 }
 
 export interface ViewerCommand {
-  type: 'glb' | 'sceneGraph' | 'camera' | 'highlight';
+  type: 'glb' | 'sceneGraph' | 'camera' | 'highlight' | 'segmentation';
   action: string;
   params?: Record<string, unknown>;
 }
@@ -128,7 +128,7 @@ export function ChatInterface({ onCommand, apiEndpoint = 'http://localhost:8000'
     >
       {/* Header */}
       <div className="flex-shrink-0 border-b border-border px-4 py-3">
-        <h2 className="text-sm font-semibold">Bridge Inspector Assistant</h2>
+        <h2 className="text-sm font-semibold"> Inspector Assistant</h2>
         <p className="text-xs text-muted-foreground">
           {backendEnabled ? 'Ask questions or control viewers' : 'Backend not connected'}
         </p>

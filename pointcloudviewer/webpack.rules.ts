@@ -8,31 +8,29 @@ export const rules: Required<ModuleOptions>['rules'] = [
     test: /native_modules[/\\].+\.node$/,
     use: 'node-loader',
   },
-  {
-    test: /[/\\]node_modules[/\\].+\.(m?js|node)$/,
-    parser: { amd: false },
-    use: {
-      loader: '@vercel/webpack-asset-relocator-loader',
-      options: {
-        outputAssetBase: 'native_modules',
-      },
-    },
-  },
-  {
-    test: /\.tsx?$/,
-    exclude: /(node_modules|\.webpack)/,
-    use: {
-      loader: 'ts-loader',
-      options: {
-        transpileOnly: true,
-      },
-    },
-  },
+  //
+  // DELETE THE 'ts-loader' RULE FROM THIS FILE
+  // We will add it to each specific config instead.
+  // {
+  //   test: /\.tsx?$/,
+  //   exclude: /(node_modules|\.webpack)/,
+  //   use: {
+  //     loader: 'ts-loader',
+  //     options: {
+  //       transpileOnly: true,
+  //     },
+  //   },
+  // },
   // Handle canvas for react-pdf in Electron
   {
     test: /\.m?js$/,
     resolve: {
       fullySpecified: false,
     },
+  },
+  // Added rule for .node files inside react-pdf
+  {
+    test: /react-pdf[\/\\](?!node_modules).*\.node$/,
+    use: 'node-loader',
   },
 ];

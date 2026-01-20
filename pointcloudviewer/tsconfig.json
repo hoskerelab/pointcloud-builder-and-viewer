@@ -2,7 +2,7 @@
   "compilerOptions": {
     "target": "ES2020",
     "allowJs": true,
-    "module": "commonjs",
+    "module": "ESNext", // <-- CHANGE THIS
     "skipLibCheck": true,
     "esModuleInterop": true,
     "noImplicitAny": true,

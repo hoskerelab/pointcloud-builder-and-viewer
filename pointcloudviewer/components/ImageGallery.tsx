@@ -1,36 +1,65 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Card, CardContent } from '@/components/ui/card';
 import { AspectRatio } from '@/components/ui/aspect-ratio';
-import {
-  Dialog,
-  DialogContent,
-  DialogClose,
-} from '@/components/ui/dialog';
-import { XIcon } from 'lucide-react';
+import type { SceneImage } from '@/src/types/scene';
+import { cn } from '@/lib/utils';
 
 interface ImageGalleryProps {
   scenePath: string | null;
+  imagesData?: SceneImage[];
+  highlightedImageIndex?: number | null;
+  onImageSelect?: (image: SceneImage) => void;
 }
 
-export function ImageGallery({ scenePath }: ImageGalleryProps) {
-  const [images, setImages] = useState<string[]>([]);
+type DisplayImage = {
+  index: number;
+  absolutePath: string;
+  name: string;
+};
+
+export function ImageGallery({
+  scenePath,
+  imagesData,
+  highlightedImageIndex,
+  onImageSelect,
+}: ImageGalleryProps) {
+  const [images, setImages] = useState<DisplayImage[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [commonAspectRatio, setCommonAspectRatio] = useState<number>(16 / 9);
   const aspectRatiosRef = useRef<Map<string, number>>(new Map());
   const loadedCountRef = useRef<number>(0);
-  const [selectedImage, setSelectedImage] = useState<{ path: string; name: string } | null>(null);
-  const [dialogSize, setDialogSize] = useState({ width: 800, height: 600 });
-  const resizeRef = useRef<{ isResizing: boolean; startX: number; startY: number; startWidth: number; startHeight: number }>({
-    isResizing: false,
-    startX: 0,
-    startY: 0,
-    startWidth: 0,
-    startHeight: 0,
-  });
+
+  const cardRefs = useRef<Map<number, HTMLDivElement>>(new Map());
+
+  const normalisedImages = useMemo(() => {
+    if (!imagesData) return null;
+    return imagesData
+      .filter((img): img is SceneImage & { absolutePath: string } => typeof img.absolutePath === 'string')
+      .map((img) => ({
+        index: img.index,
+        absolutePath: img.absolutePath as string,
+        name: img.name,
+      }))
+      .sort((a, b) => a.index - b.index);
+  }, [imagesData]);
 
   useEffect(() => {
+    const resetAspectTracking = () => {
+      aspectRatiosRef.current.clear();
+      loadedCountRef.current = 0;
+      setCommonAspectRatio(16 / 9);
+    };
+
+    if (normalisedImages) {
+      setImages(normalisedImages);
+      setError(null);
+      setLoading(false);
+      resetAspectTracking();
+      return;
+    }
+
     const loadImages = async () => {
       if (!scenePath) {
         setImages([]);
@@ -40,15 +69,17 @@ export function ImageGallery({ scenePath }: ImageGalleryProps) {
 
       setLoading(true);
       setError(null);
-      // Reset aspect ratio tracking
-      aspectRatiosRef.current.clear();
-      loadedCountRef.current = 0;
-      setCommonAspectRatio(16 / 9); // Reset to default
+      resetAspectTracking();
 
       try {
         const imagePaths = await window.electron.getSceneImages(scenePath);
         if (imagePaths) {
-          setImages(imagePaths);
+          const mapped = imagePaths.map((absolutePath, index) => ({
+            index,
+            absolutePath,
+            name: absolutePath.split('/').pop() || `Image ${index + 1}`,
+          }));
+          setImages(mapped);
         } else {
           setError('Failed to load images');
         }
@@ -61,23 +92,18 @@ export function ImageGallery({ scenePath }: ImageGalleryProps) {
     };
 
     loadImages();
-  }, [scenePath]);
+  }, [scenePath, normalisedImages]);
 
   const handleImageLoad = (event: React.SyntheticEvent<HTMLImageElement>): void => {
     const img = event.currentTarget;
     const aspectRatio = img.naturalWidth / img.naturalHeight;
-
-    // Round to nearest common aspect ratio for grouping
     const roundedRatio = Math.round(aspectRatio * 100) / 100;
-
-    // Track this aspect ratio
     const ratioKey = roundedRatio.toFixed(2);
     const currentCount = aspectRatiosRef.current.get(ratioKey) || 0;
     aspectRatiosRef.current.set(ratioKey, currentCount + 1);
 
     loadedCountRef.current += 1;
 
-    // Once we've loaded at least half the images, calculate most common ratio
     if (loadedCountRef.current >= Math.ceil(images.length / 2)) {
       let maxCount = 0;
       let mostCommonRatio = 16 / 9;
@@ -93,42 +119,23 @@ export function ImageGallery({ scenePath }: ImageGalleryProps) {
     }
   };
 
-  const handleResizeStart = (e: React.MouseEvent): void => {
-    e.preventDefault();
-    resizeRef.current = {
-      isResizing: true,
-      startX: e.clientX,
-      startY: e.clientY,
-      startWidth: dialogSize.width,
-      startHeight: dialogSize.height,
-    };
-  };
-
   useEffect(() => {
-    const handleResizeMove = (e: MouseEvent): void => {
-      if (!resizeRef.current.isResizing) return;
+    if (highlightedImageIndex === null || highlightedImageIndex === undefined) return;
+    const node = cardRefs.current.get(highlightedImageIndex);
+    if (node) {
+      node.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    }
+  }, [highlightedImageIndex]);
 
-      const deltaX = e.clientX - resizeRef.current.startX;
-      const deltaY = e.clientY - resizeRef.current.startY;
-
-      const newWidth = Math.max(400, Math.min(window.innerWidth * 0.95, resizeRef.current.startWidth + deltaX));
-      const newHeight = Math.max(300, Math.min(window.innerHeight * 0.95, resizeRef.current.startHeight + deltaY));
-
-      setDialogSize({ width: newWidth, height: newHeight });
-    };
-
-    const handleResizeEnd = (): void => {
-      resizeRef.current.isResizing = false;
-    };
-
-    document.addEventListener('mousemove', handleResizeMove);
-    document.addEventListener('mouseup', handleResizeEnd);
-
-    return () => {
-      document.removeEventListener('mousemove', handleResizeMove);
-      document.removeEventListener('mouseup', handleResizeEnd);
-    };
-  }, []);
+  const handleImageClick = (image: DisplayImage) => {
+    if (typeof onImageSelect === 'function') {
+      onImageSelect({
+        index: image.index,
+        name: image.name,
+        absolutePath: image.absolutePath,
+      });
+    }
+  };
 
   if (!scenePath) {
     return (
@@ -163,18 +170,28 @@ export function ImageGallery({ scenePath }: ImageGalleryProps) {
   }
 
   return (
-    <>
-      <ScrollArea className="h-full w-full">
-        <div className="p-4 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {images.map((imagePath, index) => {
-            const imageUrl = `file://${imagePath}`;
-            const imageName = imagePath.split('/').pop() || `Image ${index + 1}`;
+    <ScrollArea className="h-full w-full">
+      <div className="p-4 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          {images.map((image) => {
+            const imageUrl = `safe-file://${image.absolutePath}`;
+            const imageName = image.name || `Image ${image.index + 1}`;
+            const isHighlighted = highlightedImageIndex === image.index;
 
             return (
               <Card
-                key={index}
-                className="overflow-hidden transition-colors py-0 px-0 p-0 cursor-pointer border-2 border-transparent hover:border-white"
-                onClick={() => setSelectedImage({ path: imagePath, name: imageName })}
+                key={`${image.index}-${image.absolutePath}`}
+                ref={(node) => {
+                  if (!node) {
+                    cardRefs.current.delete(image.index);
+                    return;
+                  }
+                  cardRefs.current.set(image.index, node);
+                }}
+                className={cn(
+                  'overflow-hidden transition-colors py-0 px-0 p-0 cursor-pointer border-2 border-transparent hover:border-white',
+                  isHighlighted && 'border-primary ring-2 ring-primary/40'
+                )}
+                onClick={() => handleImageClick(image)}
               >
                 <CardContent className="py-0 px-0">
                   <AspectRatio ratio={commonAspectRatio}>
@@ -195,42 +212,7 @@ export function ImageGallery({ scenePath }: ImageGalleryProps) {
               </Card>
             );
           })}
-        </div>
-      </ScrollArea>
-
-      <Dialog open={selectedImage !== null} onOpenChange={(open) => { if (!open) setSelectedImage(null); }}>
-        <DialogContent
-          className="p-0 overflow-hidden"
-          style={{ width: dialogSize.width, height: dialogSize.height, maxWidth: '95vw', maxHeight: '95vh' }}
-          showCloseButton={false}
-        >
-          <DialogClose className="absolute -top-10 right-0 z-50 rounded-sm opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:pointer-events-none bg-background border border-border p-1.5">
-            <XIcon className="h-4 w-4" />
-            <span className="sr-only">Close</span>
-          </DialogClose>
-          <div className="flex items-center justify-center relative w-full h-full bg-background">
-            {selectedImage && (
-              <>
-                <img
-                  src={`file://${selectedImage.path}`}
-                  alt={selectedImage.name}
-                  className="max-w-full max-h-full object-contain"
-                />
-                <div className="absolute bottom-0 left-0 right-0 bg-black/60 backdrop-blur-sm px-4 py-2">
-                  <p className="text-sm text-white/90 truncate text-center">
-                    {selectedImage.name}
-                  </p>
-                </div>
-              </>
-            )}
-          </div>
-          <div
-            className="absolute bottom-0 right-0 w-4 h-4 cursor-nwse-resize bg-border hover:bg-primary/50 transition-colors"
-            onMouseDown={handleResizeStart}
-            style={{ clipPath: 'polygon(100% 0, 100% 100%, 0 100%)' }}
-          />
-        </DialogContent>
-      </Dialog>
-    </>
+      </div>
+    </ScrollArea>
   );
 }

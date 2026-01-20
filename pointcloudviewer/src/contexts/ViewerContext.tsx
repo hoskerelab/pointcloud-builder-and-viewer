@@ -1,4 +1,6 @@
 import React, { createContext, useContext, useRef, ReactNode } from 'react';
+import type { SceneCamera } from '@/src/types/scene';
+import * as THREE from 'three';
 
 export interface GLBViewerControls {
   setCameraPosition: (x: number, y: number, z: number) => void;
@@ -6,6 +8,10 @@ export interface GLBViewerControls {
   resetCamera: () => void;
   focusOnPoint: (x: number, y: number, z: number) => void;
   focus: () => void;
+  animateToCameraView: (camera: SceneCamera, distance?: number) => void;
+  find3DPointFromRay: (ray: THREE.Ray) => void;
+  redoDebugRay: () => void;
+  undoDebugRay: () => void;
 }
 
 export interface SceneGraphViewerControls {
