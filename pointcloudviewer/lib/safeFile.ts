@@ -1,16 +1,31 @@
+// lib/safeFile.ts
+// IMPORTANT: imported by renderer/React, so NO Node imports allowed.
+
 export function toSafeFileUrl(filePath: string): string {
-  const normalized = filePath.replace(/\\/g, '/');
-  const driveMatch = normalized.match(/^([a-zA-Z]):(\/.*)?$/);
-  if (driveMatch) {
-    const drive = driveMatch[1].toUpperCase();
-    const rest = driveMatch[2] ?? '/';
-    return `safe-file:///${drive}:${encodeURI(rest)}`;
+  const p = filePath.replace(/\\/g, "/");
+
+  // Windows drive paths: C:/Users/... or C:\Users\...
+  // -> safe-file:///C:/Users/...
+  const drive = p.match(/^([a-zA-Z]):(\/.*)?$/);
+  if (drive) {
+    const letter = drive[1].toUpperCase();
+    const rest = drive[2] ?? "/";
+    return `safe-file:///${letter}:${encodeURI(rest)}`;
   }
-  if (normalized.startsWith('//')) {
-    return `safe-file:${encodeURI(normalized)}`;
+
+  // UNC paths: //server/share/...
+  // -> safe-file:////server/share/...
+  if (p.startsWith("//")) {
+    return `safe-file:${encodeURI(p)}`;
   }
-  if (normalized.startsWith('/')) {
-    return `safe-file://${encodeURI(normalized)}`;
+
+  // POSIX absolute paths: /Users/...  (mac/linux)
+  // -> safe-file:///Users/...
+  // NOTE: this must be TWO slashes in template + leading "/" in path = 3 total
+  if (p.startsWith("/")) {
+    return `safe-file://${encodeURI(p)}`;
   }
-  return `safe-file:///${encodeURI(normalized)}`;
+
+  // Relative fallback -> safe-file:///relative/path
+  return `safe-file:///${encodeURI(p)}`;
 }
