@@ -14,6 +14,8 @@ import { FolderOpen, Box, Map, Eye } from 'lucide-react'
 import { ViewerTools } from '@/components/ViewerTools'; // Viewer toolbar
 import * as THREE from 'three'; // Import THREE for Euler
 import { ChatInterface, ViewerCommand } from "@/components/ChatInterface"
+import { RtspPanel } from "@/components/RtspPanel";
+
 import {
   Sidebar,
   SidebarContent,
@@ -403,12 +405,32 @@ function App() {
 
             <ResizableHandle />
 
-            {/* RIGHT PANEL: Chat Interface */}
-            <ResizablePanel defaultSize={25} minSize={20} maxSize={40}>
-                <div className="h-full border-l border-border bg-sidebar">
-                    <ChatInterface onCommand={handleViewerCommand} />
+            {/* RIGHT PANEL: Split into two sections */}
+          <ResizablePanel defaultSize={25} minSize={20} maxSize={40}>
+            <ResizablePanelGroup direction="vertical" className="h-full">
+              
+              {/* TOP HALF: your new window/view */}
+              <ResizablePanel defaultSize={50} minSize={20}>
+                <div className="h-full border-l border-b border-border bg-sidebar">
+                  {/* Put your new component here */}
+                  <div className="p-3 text-sm text-muted-foreground">
+                    <RtspPanel />
+                  </div>
                 </div>
-            </ResizablePanel>
+              </ResizablePanel>
+
+              <ResizableHandle />
+
+              {/* BOTTOM HALF: existing chat */}
+              <ResizablePanel defaultSize={50} minSize={20}>
+                <div className="h-full border-l border-border bg-sidebar">
+                  <ChatInterface onCommand={handleViewerCommand} />
+                </div>
+              </ResizablePanel>
+
+            </ResizablePanelGroup>
+          </ResizablePanel>
+
 
           </ResizablePanelGroup>
         </main>

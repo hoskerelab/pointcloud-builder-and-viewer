@@ -84,6 +84,8 @@ interface ElectronAPI {
   getAppPath: () => Promise<string>;
   pathJoin: (...parts: string[]) => Promise<string>;
   sendChatMessage: (message: string, endpoint?: string) => Promise<ChatResponse>;
+  startRtsp: (url: string) => Promise<{ mjpegUrl: string }>;
+  stopRtsp: () => Promise<boolean>;
 }
 
 declare global {

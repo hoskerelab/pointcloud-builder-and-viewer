@@ -95,4 +95,11 @@ contextBridge.exposeInMainWorld('electron', {
   // Chat API
   sendChatMessage: (message: string, endpoint?: string): Promise<any> =>
     ipcRenderer.invoke('chat:sendMessage', message, endpoint),
+  //  RTSP / RTSPS Stream (new)
+  startRtsp: (url: string): Promise<{ mjpegUrl: string }> =>
+    ipcRenderer.invoke("rtsp:start", url),
+
+  stopRtsp: (): Promise<boolean> =>
+    ipcRenderer.invoke("rtsp:stop"),
+
 });

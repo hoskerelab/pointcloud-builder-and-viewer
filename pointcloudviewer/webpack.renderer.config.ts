@@ -49,6 +49,7 @@ export const rendererConfig: Configuration = {
         // Allow WebAssembly
         "script-src 'self' 'unsafe-eval' 'unsafe-inline';",
         "style-src 'self' 'unsafe-inline';",
+        "img-src 'self' data: blob: http://localhost:* http://127.0.0.1:*;",
         // Allow HMR and the githack.com server
         "connect-src 'self' ws://localhost:* http://localhost:* https://raw.githack.com;",
       ].join(' '),
