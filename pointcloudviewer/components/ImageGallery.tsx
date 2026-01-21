@@ -4,6 +4,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { AspectRatio } from '@/components/ui/aspect-ratio';
 import type { SceneImage } from '@/src/types/scene';
 import { cn } from '@/lib/utils';
+import { toSafeFileUrl } from '@/lib/safeFile';
 
 interface ImageGalleryProps {
   scenePath: string | null;
@@ -173,7 +174,7 @@ export function ImageGallery({
     <ScrollArea className="h-full w-full">
       <div className="p-4 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {images.map((image) => {
-            const imageUrl = `safe-file://${image.absolutePath}`;
+            const imageUrl = toSafeFileUrl(image.absolutePath);
             const imageName = image.name || `Image ${image.index + 1}`;
             const isHighlighted = highlightedImageIndex === image.index;
 

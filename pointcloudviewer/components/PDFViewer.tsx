@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { Document, Page, pdfjs } from 'react-pdf';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { toSafeFileUrl } from '@/lib/safeFile';
 
 // Configure PDF.js worker for Electron - use relative path to bundled worker
 if (typeof window !== 'undefined') {
@@ -22,7 +23,7 @@ export function PDFViewer({ pdfPath }: PDFViewerProps) {
   // Convert file path to safe-file:// URL and memoize it
   const fileUrl = useMemo(() => {
     if (!pdfPath) return null;
-    return `safe-file://${pdfPath}`;
+    return toSafeFileUrl(pdfPath);
   }, [pdfPath]);
 
   // Reset displayed pages when PDF changes

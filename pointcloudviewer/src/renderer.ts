@@ -48,6 +48,15 @@
 // --- REPLACE YOUR ENTIRE FILE CONTENT WITH THIS ---
 console.log('--- [RENDERER] renderer.ts EXECUTING (TOP OF FILE) ---');
 
+window.addEventListener('error', (event) => {
+  const err = event.error ?? event.message;
+  console.error('[Renderer] window.error:', err);
+});
+
+window.addEventListener('unhandledrejection', (event) => {
+  console.error('[Renderer] unhandledrejection:', event.reason);
+});
+
 // 1. Check for Node.js globals
 console.log('--- [RENDERER] Checking Node.js Globals ---');
 try {

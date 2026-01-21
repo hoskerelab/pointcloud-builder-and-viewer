@@ -6,6 +6,7 @@ import type { SceneImage, SceneData, SceneCamera } from '@/src/types/scene';
 // Correct import from the root 'hooks' directory
 import { useNavGraph } from '@/hooks/useNavGraph'; 
 import { Loader2 } from 'lucide-react'; 
+import { toSafeFileUrl } from '@/lib/safeFile';
 
 import * as THREE from 'three';
 import { useThree } from '@react-three/fiber'; // We'll borrow this for its raycaster
@@ -375,7 +376,7 @@ export function StreetViewer({
       <div className="relative max-w-full max-h-full">
         <img
           ref={imageRef}
-          src={`safe-file://${currentImage.absolutePath}`}
+          src={toSafeFileUrl(currentImage.absolutePath)}
           alt={currentImage.name}
           onLoad={handleImageLoad}
           onClick={handleImageClick} // <-- ADD CLICK HANDLER

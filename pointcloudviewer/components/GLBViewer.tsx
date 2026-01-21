@@ -18,6 +18,7 @@ import type { GLBViewerControls } from '@/src/contexts/ViewerContext';
 import type { SceneCamera } from '@/src/types/scene';
 import { MeasurementOverlay } from './MeasurementOverlay';
 import { SegmentationLayer } from './SegmentationLayer';
+import { toSafeFileUrl } from '@/lib/safeFile';
 
 interface GLBViewerProps {
   glbPath: string | null;
@@ -463,7 +464,7 @@ export const GLBViewer = forwardRef<GLBViewerControls, GLBViewerProps>(({
 
   const fileUrl = useMemo(() => {
     if (!glbPath) return null;
-    return `safe-file://${glbPath}`;
+    return toSafeFileUrl(glbPath);
   }, [glbPath]);
 
   const keyboardMap = useMemo(() => [
