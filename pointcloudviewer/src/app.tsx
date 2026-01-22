@@ -10,11 +10,11 @@ import { StreetViewer } from "@/components/StreetViewer"
 import type { GLBViewerControls } from "@/src/contexts/ViewerContext"
 import { useSceneData } from "@/hooks/useSceneData"
 import type { SceneCamera, SceneImage } from "@/src/types/scene"
-import { FolderOpen, Box, Map, Eye } from 'lucide-react'
+import { FolderOpen, Box, Map, Eye, Video } from 'lucide-react'
 import { ViewerTools } from '@/components/ViewerTools'; // Viewer toolbar
 import * as THREE from 'three'; // Import THREE for Euler
 import { ChatInterface, ViewerCommand } from "@/components/ChatInterface"
-import { RtspPanel } from "@/components/RtspPanel";
+import { RtspFloatingWidget } from "@/components/RtspFloatingWidget";
 
 import {
   Sidebar,
@@ -41,6 +41,7 @@ function App() {
   const { data: sceneData, loading: sceneDataLoading, error: sceneDataError } = useSceneData(scenePathForData);
   const [selectedCameraIndex, setSelectedCameraIndex] = useState<number | null>(null);
   const [highlightedImageIndex, setHighlightedImageIndex] = useState<number | null>(null);
+  const [showRtsp, setShowRtsp] = useState(false);
 
   // Refs for viewer controls
   const glbViewerRef = useRef<GLBViewerControls>(null);
@@ -263,6 +264,16 @@ function App() {
                 <Box className="size-sidebar-icon" />
                 <span className="sr-only">Open GLB File</span>
               </Button>
+              <Button
+                onClick={() => setShowRtsp((prev) => !prev)}
+                variant="ghost"
+                size="icon"
+                className="size-sidebar-icon hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+                aria-pressed={showRtsp}
+              >
+                <Video className="size-sidebar-icon" />
+                <span className="sr-only">Toggle Live Stream</span>
+              </Button>
             </>
           }
         >
@@ -405,35 +416,17 @@ function App() {
 
             <ResizableHandle />
 
-            {/* RIGHT PANEL: Split into two sections */}
-          <ResizablePanel defaultSize={25} minSize={20} maxSize={40}>
-            <ResizablePanelGroup direction="vertical" className="h-full">
-              
-              {/* TOP HALF: your new window/view */}
-              <ResizablePanel defaultSize={50} minSize={20}>
-                <div className="h-full border-l border-b border-border bg-sidebar">
-                  {/* Put your new component here */}
-                  <div className="p-3 text-sm text-muted-foreground">
-                    <RtspPanel />
-                  </div>
-                </div>
-              </ResizablePanel>
-
-              <ResizableHandle />
-
-              {/* BOTTOM HALF: existing chat */}
-              <ResizablePanel defaultSize={50} minSize={20}>
-                <div className="h-full border-l border-border bg-sidebar">
-                  <ChatInterface onCommand={handleViewerCommand} />
-                </div>
-              </ResizablePanel>
-
-            </ResizablePanelGroup>
-          </ResizablePanel>
+            {/* RIGHT PANEL: Chat only (stream is now floating) */}
+            <ResizablePanel defaultSize={25} minSize={20} maxSize={40}>
+              <div className="h-full border-l border-border bg-sidebar">
+                <ChatInterface onCommand={handleViewerCommand} />
+              </div>
+            </ResizablePanel>
 
 
           </ResizablePanelGroup>
         </main>
+        {showRtsp && <RtspFloatingWidget />}
       </div>
     </SidebarProvider>
   );
