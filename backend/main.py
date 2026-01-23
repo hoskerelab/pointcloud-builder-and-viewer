@@ -27,6 +27,7 @@ import os
 solver = None  
 model = None 
 accumulated_images = {}  
+accepted_sequences = set()
 SUBMAP_SIZE = 16
 temp_dir = "/tmp/vggt_images"
 os.makedirs(temp_dir, exist_ok=True)
@@ -40,7 +41,7 @@ async def lifespan(app: FastAPI):
     solver = Solver(
         init_conf_threshold=25.0,
         use_point_map=False,
-        use_sim3=False,
+        use_sim3=True,
         gradio_mode=False,
         vis_stride = 1,
         vis_point_size = 0.003,
@@ -130,6 +131,13 @@ async def websocket_upload(websocket: WebSocket):
 
                     print(f"Sent PLY file: submap_{unique_id}.ply")
 
+                    # Remove temporary PLY file after sending
+                    try:
+                        os.remove(ply_file)
+                        print(f"Deleted temporary PLY file: {ply_file}")
+                    except OSError as e:
+                        print(f"Failed to delete temporary PLY file {ply_file}: {e}")
+
                     processing_task = None
 
                     # Check if there's a pending batch to process now
@@ -171,67 +179,61 @@ async def websocket_upload(websocket: WebSocket):
                 test_img = cv2.imread(image_path)
                 if test_img is not None:
                     print(f"Saved image {sequence_counter}: {image_path}, shape={test_img.shape}")
-                    accumulated_images[sequence_counter] = image_path
-                    print(f"Added image {sequence_counter} to accumulated_images")
+                    # Run disparity check ONCE when the frame arrives
+                    enough_disparity = solver.flow_tracker.compute_disparity(test_img, 25, False)
+                    print(f"Image {sequence_counter}: initial disparity check = {enough_disparity}")
+                    if enough_disparity:
+                        accumulated_images[sequence_counter] = image_path
+                        accepted_sequences.add(sequence_counter)
+                        print(f"Added image {sequence_counter} to accumulated_images and accepted_sequences")
+                    else:
+                        print(f"Image {sequence_counter} rejected due to low disparity")
                 else:
                     print(f"Warning: Could not read saved image {sequence_counter}")
                     continue
 
-            if len(accumulated_images) >= SUBMAP_SIZE:
-                print(f"Have {len(accumulated_images)} images, attempting to build batch...")
-                # Sort by sequence
-                sorted_sequences = sorted(accumulated_images.keys())
+            # Build batches only from frames that have already passed disparity once
+            if len(accepted_sequences) >= SUBMAP_SIZE + 1:
+                print(f"Have {len(accepted_sequences)} accepted images, attempting to build batch...")
+                sorted_accepted = sorted(accepted_sequences)
                 batch = []
-                
-                for seq in sorted_sequences:
-                    img_path = accumulated_images[seq]
-                    
+                used_seqs = []
+
+                for seq in sorted_accepted:
+                    img_path = accumulated_images.get(seq)
+                    if img_path is None:
+                        continue
+
                     # Verify file exists and is readable before including in batch
                     if os.path.exists(img_path) and os.path.getsize(img_path) > 0:
                         img = cv2.imread(img_path)
                         if img is not None and img.size > 0:
-                            enough_disparity = solver.flow_tracker.compute_disparity(img, 50, False)
-                            print(f"Image {seq}: disparity check = {enough_disparity}")
-                            if enough_disparity:
-                                batch.append(img_path)
-                                print(f"Added to batch {seq}: {img_path} (batch size: {len(batch)})")
-                                if len(batch) == SUBMAP_SIZE + 1:
-                                    print(f"Batch complete with {len(batch)} images!")
-                                    break
-                            else:
-                                # Remove images that fail disparity check - don't keep them for future batches
-                                del accumulated_images[seq]
-                                print(f"Removed failed disparity image {seq} from accumulated")
+                            batch.append(img_path)
+                            used_seqs.append(seq)
+                            print(f"Added to batch {seq}: {img_path} (batch size: {len(batch)})")
+                            if len(batch) == SUBMAP_SIZE + 1:
+                                print(f"Batch complete with {len(batch)} images!")
+                                break
                         else:
-                            print(f"Warning: Could not read image {img_path}, removing from accumulated")
-                            del accumulated_images[seq]
+                            print(f"Warning: Could not read image {img_path}, removing from accumulated and accepted_sequences")
+                            accumulated_images.pop(seq, None)
+                            accepted_sequences.discard(seq)
                     else:
-                        print(f"Warning: Image file {img_path} not found or empty, removing from accumulated")
-                        del accumulated_images[seq]
-                
-                # Only remove images from accumulated_images if we successfully created a batch
+                        print(f"Warning: Image file {img_path} not found or empty, removing from accumulated and accepted_sequences")
+                        accumulated_images.pop(seq, None)
+                        accepted_sequences.discard(seq)
+
+                # Only remove images from state if we successfully created a batch
                 if len(batch) == SUBMAP_SIZE + 1:
                     # Remove all images that were used in this batch EXCEPT the last one (overlap)
-                    # This includes all images that were checked before reaching the batch size
-                    images_to_remove = []
-                    for seq in sorted_sequences:
-                        if seq in accumulated_images: 
-                            img_path = accumulated_images[seq]
-                            if img_path in batch[:-1]:
-                                images_to_remove.append(seq)
-                    
-                    for seq in images_to_remove:
-                        del accumulated_images[seq]
-                        print(f"Removed processed image {seq} from accumulated")
-                    
-                    # Keep the last image for overlap with the next batch
-                    overlap_image = batch[-1]
-                    basename = os.path.basename(overlap_image)
-                    seq_str = basename.split('_')[1].split('.')[0]
-                    seq = int(seq_str)
-                    accumulated_images[seq] = overlap_image
-                    print(f"Kept overlap image {seq}: {overlap_image}")
-                    
+                    overlap_seq = used_seqs[-1]
+                    for seq in used_seqs[:-1]:
+                        accumulated_images.pop(seq, None)
+                        accepted_sequences.discard(seq)
+                        print(f"Removed processed image {seq} from accumulated and accepted_sequences")
+
+                    print(f"Kept overlap image {overlap_seq}: {accumulated_images.get(overlap_seq)}")
+
                     if processing_task is None:
                         processing_task = asyncio.create_task(process_batch_async(batch, solver, model, accumulated_images))
                         print("Started processing batch")
@@ -245,7 +247,7 @@ async def websocket_upload(websocket: WebSocket):
                         else:
                             print("Already have a pending batch, skipping this one")
                 else:
-                    print(f"Could not build complete batch. Got {len(batch)} images, need {SUBMAP_SIZE + 1}")
+                    print(f"Could not build complete batch from accepted images. Got {len(batch)}, need {SUBMAP_SIZE + 1}")
 
             sequence_counter += 1
 
@@ -266,6 +268,47 @@ async def websocket_upload(websocket: WebSocket):
             except asyncio.CancelledError:
                 pass
 
+        # Process any remaining accepted images as a final partial batch
+        try:
+            if accepted_sequences:
+                remaining_seqs = sorted(accepted_sequences)
+                final_batch = []
+                for seq in remaining_seqs:
+                    img_path = accumulated_images.get(seq)
+                    if not img_path:
+                        continue
+                    if os.path.exists(img_path) and os.path.getsize(img_path) > 0:
+                        img = cv2.imread(img_path)
+                        if img is not None and img.size > 0:
+                            final_batch.append(img_path)
+
+                if len(final_batch) > 0:
+                    print(f"Processing final partial batch with {len(final_batch)} images")
+                    try:
+                        ply_file, unique_id = await process_batch_async(final_batch, solver, model, accumulated_images)
+                        # Attempt to send the final result if the WebSocket is still open
+                        try:
+                            with open(ply_file, 'rb') as f:
+                                ply_data = f.read()
+                            await websocket.send_text(f"filename:{unique_id}")
+                            await websocket.send_bytes(ply_data)
+                            print(f"Sent final partial PLY file: submap_{unique_id}.ply")
+                            # Remove temporary PLY file after sending
+                            try:
+                                os.remove(ply_file)
+                                print(f"Deleted temporary final PLY file: {ply_file}")
+                            except OSError as e:
+                                print(f"Failed to delete temporary final PLY file {ply_file}: {e}")
+                        except Exception as send_err:
+                            print(f"Could not send final partial batch result: {send_err}")
+                    except Exception as final_err:
+                        print(f"Error while processing final partial batch: {final_err}")
+        except Exception as e:
+            print(f"Error during final batch handling: {e}")
+
+        # TO-DO: Have camera poses save to a tmp txt file and sent to the front end for display
+        # solver.map.write_poses_to_file("/home/sailuh/Desktop/Electron Visualizer/RealtimePointCloudBuilderAndViewer/conf_values_test/posestest.txt")
+
         try:
             # Remove all temp images since the session is ending
             for filename in os.listdir(temp_dir):
@@ -278,6 +321,10 @@ async def websocket_upload(websocket: WebSocket):
                         pass 
         except Exception as e:
             print(f"Error during temp file cleanup: {e}")
+
+        # Clear in-memory tracking structures for this session
+        accumulated_images.clear()
+        accepted_sequences.clear()
 
         try:
             await websocket.close()
@@ -310,6 +357,10 @@ def new_process_submap(images, solver, model):
         basename = os.path.basename(path)
         seq_str = basename.split('_')[1].split('.')[0]
         return int(seq_str)
+    
+    seqs = [get_seq(p) for p in images]
+    print("Batch seqs:", seqs)
+    
     images = sorted(images, key=get_seq)
     print(images)
     predictions = solver.run_predictions(images, model, 1)
@@ -334,10 +385,10 @@ def new_process_submap(images, solver, model):
 
     unique_id = str(uuid.uuid4())[:8]  # Short UUID for filename (e.g., 'a1b2c3d4')
 
-    # Create PLY in a local directory
-    ply_dir = "/home/sailuh/Desktop/Electron Visualizer/backend/glbs"
-    os.makedirs(ply_dir, exist_ok=True)
-    ply_file = os.path.join(ply_dir, f"submap_{unique_id}.ply")
+    # Create PLY in a temporary file
+    tmp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".ply")
+    ply_file = tmp_file.name
+    tmp_file.close()
     success = o3d.io.write_point_cloud(ply_file, pcd_cloud)
     if not success:
         raise Exception("Failed to create PLY")
