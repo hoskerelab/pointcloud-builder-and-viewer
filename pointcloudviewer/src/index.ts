@@ -299,6 +299,18 @@ interface FileInfo {
   modified?: Date;
 }
 
+function getReportsDir(scenePath: string): string {
+  return path.join(scenePath, 'reports');
+}
+
+function getMeasurementsFilePath(scenePath: string): string {
+  return path.join(getReportsDir(scenePath), 'measurements.json');
+}
+
+function getSnapshotPath(scenePath: string, measurementId: string): string {
+  return path.join(getReportsDir(scenePath), 'snapshots', `measurement-${measurementId}.png`);
+}
+
 async function fileExists(filePath: string): Promise<boolean> {
   try {
     await fs.promises.access(filePath);
@@ -566,6 +578,79 @@ ipcMain.handle('fs:getSceneMetadata', async (_event, scenePath: string): Promise
   } catch (error) {
     console.error('Error reading scene metadata:', error);
     return null;
+  }
+});
+
+// Load measurements for a scene (from userData/reports)
+ipcMain.handle('fs:loadMeasurements', async (_event, scenePath: string): Promise<any[] | null> => {
+  try {
+    const filePath = getMeasurementsFilePath(scenePath);
+    try {
+      await fs.promises.access(filePath);
+    } catch {
+      return [];
+    }
+    const fileContent = await fs.promises.readFile(filePath, 'utf-8');
+    const payload = JSON.parse(fileContent);
+    if (payload && Array.isArray(payload.measurements)) {
+      return payload.measurements;
+    }
+    return [];
+  } catch (error) {
+    console.error('Error loading measurements:', error);
+    return null;
+  }
+});
+
+// Save measurements for a scene (to userData/reports)
+ipcMain.handle('fs:saveMeasurements', async (_event, scenePath: string, measurements: any[]): Promise<string | null> => {
+  try {
+    const filePath = getMeasurementsFilePath(scenePath);
+    await fs.promises.mkdir(path.dirname(filePath), { recursive: true });
+    const payload = {
+      scenePath,
+      updatedAt: new Date().toISOString(),
+      measurements,
+    };
+    await fs.promises.writeFile(filePath, JSON.stringify(payload, null, 2), 'utf-8');
+    return filePath;
+  } catch (error) {
+    console.error('Error saving measurements:', error);
+    return null;
+  }
+});
+
+ipcMain.handle('fs:saveMeasurementSnapshot', async (_event, scenePath: string, measurementId: string, dataUrl: string): Promise<string | null> => {
+  try {
+    const match = dataUrl.match(/^data:image\/png;base64,(.+)$/);
+    if (!match) {
+      throw new Error('Invalid PNG data URL');
+    }
+    const buffer = Buffer.from(match[1], 'base64');
+    const filePath = getSnapshotPath(scenePath, measurementId);
+    await fs.promises.mkdir(path.dirname(filePath), { recursive: true });
+    await fs.promises.writeFile(filePath, buffer);
+    return filePath;
+  } catch (error) {
+    console.error('Error saving measurement snapshot:', error);
+    return null;
+  }
+});
+
+ipcMain.handle('fs:deleteMeasurementSnapshot', async (_event, scenePath: string, measurementId: string): Promise<boolean> => {
+  try {
+    const filePath = getSnapshotPath(scenePath, measurementId);
+    try {
+      await fs.promises.unlink(filePath);
+    } catch (error: any) {
+      if (error?.code !== 'ENOENT') {
+        throw error;
+      }
+    }
+    return true;
+  } catch (error) {
+    console.error('Error deleting measurement snapshot:', error);
+    return false;
   }
 });
 

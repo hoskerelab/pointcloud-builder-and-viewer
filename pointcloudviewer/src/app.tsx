@@ -1,7 +1,7 @@
 // src/app.tsx
 
 import { createRoot } from 'react-dom/client'
-import React, { useState, useEffect, useRef } from 'react'
+import React, { useState, useEffect, useRef, useMemo } from 'react'
 import { Button } from "@/components/ui/button"
 import { FileTree } from "@/components/FileTree"
 import { GLBViewer } from "@/components/GLBViewer"
@@ -14,6 +14,11 @@ import { FolderOpen, Box, Map, Eye } from 'lucide-react'
 import { ViewerTools } from '@/components/ViewerTools'; // Viewer toolbar
 import * as THREE from 'three'; // Import THREE for Euler
 import { ChatInterface, ViewerCommand } from "@/components/ChatInterface"
+import { ReportPage } from '@/components/ReportPage'
+import type { CurrentMeasurement, Measurement } from "@/src/types/measurement";
+import { toSafeFileUrl } from "@/lib/safeFile";
+import { projectWorldPointToImage } from "@/hooks/useSceneData";
+
 import {
   Sidebar,
   SidebarContent,
@@ -39,6 +44,17 @@ function App() {
   const { data: sceneData, loading: sceneDataLoading, error: sceneDataError } = useSceneData(scenePathForData);
   const [selectedCameraIndex, setSelectedCameraIndex] = useState<number | null>(null);
   const [highlightedImageIndex, setHighlightedImageIndex] = useState<number | null>(null);
+  const currentImage = useMemo(() => {
+    if (!sceneData) return null;
+    return sceneData.images.find((img) => img.index === highlightedImageIndex)
+      ?? sceneData.images[0]
+      ?? null;
+  }, [sceneData, highlightedImageIndex]);
+  const currentCamera = useMemo(() => {
+    if (!sceneData || !currentImage) return null;
+    return sceneData.cameras.find((camera) => camera.image?.index === currentImage.index || camera.index === currentImage.index)
+      ?? null;
+  }, [sceneData, currentImage]);
 
   // Refs for viewer controls
   const glbViewerRef = useRef<GLBViewerControls>(null);
@@ -49,10 +65,11 @@ function App() {
   const [pointSize, setPointSize] = useState(1.0);
   const [measurementPoints, setMeasurementPoints] = useState<THREE.Vector3[]>([]);
   const [segmentationPolygons, setSegmentationPolygons] = useState<any[]>([]);
+  const [measurements, setMeasurements] = useState<Measurement[]>([]);
 
   // Undo/Redo
   const [redoStack, setRedoStack] = useState<THREE.Vector3[]>([]); // Stack for redo
-   // --- END ---
+  // --- END ---
 
   const handleViewerCommand = (command: ViewerCommand) => {
     console.log("Received Viewer Command:", command);
@@ -61,20 +78,20 @@ function App() {
       // Handle Standard GLB Controls
       case 'glb':
         if (command.action === 'resetCamera') {
-            glbViewerRef.current?.resetCamera();
+          glbViewerRef.current?.resetCamera();
         }
         if (command.action === 'setCameraPosition' && command.params) {
-            const { x, y, z } = command.params as { x: number; y: number; z: number };
-            glbViewerRef.current?.setCameraPosition(x, y, z);
+          const { x, y, z } = command.params as { x: number; y: number; z: number };
+          glbViewerRef.current?.setCameraPosition(x, y, z);
         }
         break;
 
       // Handle Segmentation Data from Backend
       case 'segmentation': // This matches the type we send from Python
         if (command.action === 'display' && command.params?.polygons) {
-            console.log("Applying segmentation polygons:", command.params.polygons);
-            setSegmentationPolygons(command.params.polygons as any[]);
-            setMainView('3d'); // Force switch to 3D to see the result
+          console.log("Applying segmentation polygons:", command.params.polygons);
+          setSegmentationPolygons(command.params.polygons as any[]);
+          setMainView('3d'); // Force switch to 3D to see the result
         }
         break;
 
@@ -91,6 +108,27 @@ function App() {
     setHighlightedImageIndex(null);
     setMainView('3d');
   }, [scenePathForData]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadMeasurements = async () => {
+      if (!selectedScene) {
+        setMeasurements([]);
+        return;
+      }
+      const saved = await window.electron?.loadMeasurements?.(selectedScene);
+      if (!cancelled && Array.isArray(saved)) {
+        setMeasurements(saved as Measurement[]);
+      }
+    };
+
+    loadMeasurements();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedScene]);
 
   // Force dark mode
   useEffect(() => {
@@ -173,6 +211,39 @@ function App() {
     setMainView('street');
   };
 
+  const handleMeasurementSelect = (measurement: Measurement) => {
+    if (measurement.imagePath && sceneData) {
+      const match = sceneData.images.find((img) => img.absolutePath === measurement.imagePath);
+      if (match) {
+        handleImageSelect(match);
+      }
+    }
+    if (measurement.points && measurement.points.length > 0) {
+      setMeasurementPoints(measurement.points.map((p) => new THREE.Vector3(p.x, p.y, p.z)));
+      setRedoStack([]);
+      setToolMode(measurement.kind === 'area' ? 'area' : 'distance');
+    }
+  };
+
+  const handleMeasurementDelete = async (measurement: Measurement) => {
+    if (!selectedScene) return;
+    const next = measurements.filter((entry) => entry.id !== measurement.id);
+    setMeasurements(next);
+    await window.electron?.saveMeasurements?.(selectedScene, next);
+    if (measurement.snapshotPath) {
+      await window.electron?.deleteMeasurementSnapshot?.(selectedScene, measurement.id);
+    }
+  };
+
+  const handleMeasurementRename = async (measurement: Measurement, name: string) => {
+    if (!selectedScene) return;
+    const next = measurements.map((entry) =>
+      entry.id === measurement.id ? { ...entry, name } : entry
+    );
+    setMeasurements(next);
+    await window.electron?.saveMeasurements?.(selectedScene, next);
+  };
+
   const handlePointFound = (point: THREE.Vector3) => {
     setRedoStack([]); // New action clears redo history
     setMeasurementPoints((prev) => {
@@ -181,49 +252,238 @@ function App() {
         if (prev.length >= 2) return [point];
         return [...prev, point];
       }
-      
+
       // AREA MODE: Keep adding points
       if (toolMode === 'area') {
         return [...prev, point];
       }
-      
+
       return prev;
     });
   };
 
   // Undo (Pop last point, push to redo)
   const handleUndo = () => {
-      setMeasurementPoints(prev => {
-          if (prev.length === 0) return prev;
-          const newPoints = [...prev];
-          const popped = newPoints.pop();
-          if (popped) setRedoStack(stack => [...stack, popped]);
-          return newPoints;
-      });
-      // Remove the corresponding ray
-      glbViewerRef.current?.undoLastRay?.();
+    setMeasurementPoints(prev => {
+      if (prev.length === 0) return prev;
+      const newPoints = [...prev];
+      const popped = newPoints.pop();
+      if (popped) setRedoStack(stack => [...stack, popped]);
+      return newPoints;
+    });
+    // Remove the corresponding ray
+    glbViewerRef.current?.undoLastRay?.();
   };
 
   // Redo (Pop from redo, push to points)
   const handleRedo = () => {
-      setRedoStack(stack => {
-          if (stack.length === 0) return stack;
-          const newStack = [...stack];
-          const pointToRestore = newStack.pop();
-          
-          if (pointToRestore) {
-              setMeasurementPoints(prev => [...prev, pointToRestore]);
-          }
-          return newStack;
-      });
-      glbViewerRef.current?.redoDebugRay();
+    setRedoStack(stack => {
+      if (stack.length === 0) return stack;
+      const newStack = [...stack];
+      const pointToRestore = newStack.pop();
+
+      if (pointToRestore) {
+        setMeasurementPoints(prev => [...prev, pointToRestore]);
+      }
+      return newStack;
+    });
+    glbViewerRef.current?.redoDebugRay();
   };
 
   // Clear Measurements ONLY
   const handleClearMeasurements = () => {
-      setMeasurementPoints([]);
-      setRedoStack([]);
+    setMeasurementPoints([]);
+    setRedoStack([]);
   };
+
+  const currentMeasurement = useMemo<CurrentMeasurement | null>(() => {
+    if (toolMode === 'distance' && measurementPoints.length >= 2) {
+      const last = measurementPoints[measurementPoints.length - 1];
+      const prev = measurementPoints[measurementPoints.length - 2];
+      return {
+        value: last.distanceTo(prev),
+        unit: 'units',
+        kind: 'distance',
+      };
+    }
+    if (toolMode === 'area' && measurementPoints.length >= 3) {
+      const v0 = measurementPoints[0];
+      let area = 0;
+      for (let i = 1; i < measurementPoints.length - 1; i += 1) {
+        const v1 = measurementPoints[i];
+        const v2 = measurementPoints[i + 1];
+        const edge1 = new THREE.Vector3().subVectors(v1, v0);
+        const edge2 = new THREE.Vector3().subVectors(v2, v0);
+        area += new THREE.Vector3().crossVectors(edge1, edge2).length() * 0.5;
+      }
+      return {
+        value: area,
+        unit: 'units',
+        kind: 'area',
+      };
+    }
+    return null;
+  }, [toolMode, measurementPoints]);
+
+  const canSaveMeasurement = Boolean(selectedScene && currentMeasurement);
+
+  const handleSaveMeasurement = async (name: string) => {
+    if (!selectedScene || !currentMeasurement) return;
+    const id = typeof crypto !== 'undefined' && 'randomUUID' in crypto
+      ? crypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+
+    let snapshotPath: string | undefined;
+    let imagePath: string | undefined;
+    if (currentImage?.absolutePath && currentCamera) {
+      imagePath = currentImage.absolutePath;
+      const dataUrl = await buildMeasurementSnapshot(
+        currentImage.absolutePath,
+        currentCamera.extrinsicsW2C ?? currentCamera.extrinsics,
+        currentCamera.intrinsics,
+        measurementPoints,
+        currentMeasurement
+      );
+      if (dataUrl) {
+        const savedPath = await window.electron?.saveMeasurementSnapshot?.(selectedScene, id, dataUrl);
+        if (savedPath) snapshotPath = savedPath;
+      }
+    }
+
+    const entry: Measurement = {
+      id,
+      name,
+      value: currentMeasurement.value,
+      unit: currentMeasurement.unit,
+      kind: currentMeasurement.kind,
+      createdAt: new Date().toISOString(),
+      imagePath,
+      snapshotPath,
+      points: measurementPoints.map((point) => ({
+        x: point.x,
+        y: point.y,
+        z: point.z,
+      })),
+    };
+    const next = [...measurements, entry];
+    setMeasurements(next);
+    await window.electron?.saveMeasurements?.(selectedScene, next);
+  };
+
+  const buildMeasurementSnapshot = async (
+    absoluteImagePath: string,
+    extrinsicsW2C: number[][],
+    intrinsics: number[][],
+    points: THREE.Vector3[],
+    measurement: CurrentMeasurement
+  ): Promise<string | null> => {
+    try {
+      const img = await loadImage(toSafeFileUrl(absoluteImagePath));
+      const width = img.naturalWidth || img.width;
+      const height = img.naturalHeight || img.height;
+      if (!width || !height) return null;
+
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return null;
+
+      ctx.drawImage(img, 0, 0, width, height);
+
+      const projected = points
+        .map((point) => {
+          const coords = projectWorldPointToImage(
+            extrinsicsW2C,
+            intrinsics,
+            [point.x, point.y, point.z]
+          );
+          if (!coords) return null;
+          return { u: coords.u, v: coords.v };
+        })
+        .filter(Boolean) as Array<{ u: number; v: number }>;
+
+      if (projected.length === 0) {
+        return canvas.toDataURL('image/png');
+      }
+
+      ctx.lineWidth = 3;
+      ctx.strokeStyle = 'rgba(239, 68, 68, 0.9)';
+      ctx.fillStyle = 'rgba(239, 68, 68, 0.3)';
+
+      if (measurement.kind === 'area' && projected.length >= 3) {
+        ctx.beginPath();
+        ctx.moveTo(projected[0].u, projected[0].v);
+        for (let i = 1; i < projected.length; i += 1) {
+          ctx.lineTo(projected[i].u, projected[i].v);
+        }
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+      } else {
+        ctx.setLineDash([6, 6]);
+        ctx.beginPath();
+        ctx.moveTo(projected[0].u, projected[0].v);
+        for (let i = 1; i < projected.length; i += 1) {
+          ctx.lineTo(projected[i].u, projected[i].v);
+        }
+        ctx.stroke();
+        ctx.setLineDash([]);
+      }
+
+      ctx.fillStyle = 'rgba(239, 68, 68, 0.9)';
+      projected.forEach((p, index) => {
+        ctx.beginPath();
+        ctx.arc(p.u, p.v, 6, 0, Math.PI * 2);
+        ctx.fill();
+
+        const label = String.fromCharCode(65 + index);
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+        ctx.fillRect(p.u - 8, p.v - 24, 16, 14);
+        ctx.fillStyle = 'white';
+        ctx.font = '12px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(label, p.u, p.v - 17);
+        ctx.fillStyle = 'rgba(239, 68, 68, 0.9)';
+      });
+
+      const labelText = `${measurement.value.toFixed(3)} ${measurement.unit}`;
+      let labelPosition = projected[projected.length - 1];
+      if (measurement.kind === 'area' && projected.length >= 3) {
+        const centroid = projected.reduce(
+          (acc, p) => ({ u: acc.u + p.u / projected.length, v: acc.v + p.v / projected.length }),
+          { u: 0, v: 0 }
+        );
+        labelPosition = centroid;
+      } else if (projected.length >= 2) {
+        const last = projected[projected.length - 1];
+        const prev = projected[projected.length - 2];
+        labelPosition = { u: (last.u + prev.u) / 2, v: (last.v + prev.v) / 2 };
+      }
+
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+      ctx.fillRect(labelPosition.u - 40, labelPosition.v - 18, 80, 16);
+      ctx.fillStyle = 'white';
+      ctx.font = '12px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(labelText, labelPosition.u, labelPosition.v - 10);
+
+      return canvas.toDataURL('image/png');
+    } catch (error) {
+      console.warn('Unable to build measurement snapshot:', error);
+      return null;
+    }
+  };
+
+  const loadImage = (src: string): Promise<HTMLImageElement> =>
+    new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => resolve(img);
+      img.onerror = (event) => reject(event);
+      img.src = src;
+    });
 
   // Full Reset (Camera + Measurements)
   const handleResetViewer = () => {
@@ -282,13 +542,13 @@ function App() {
         <main className="flex-1 flex flex-col overflow-hidden">
           {/* 3. HORIZONTAL SPLIT: Viewer (Left) | Chat (Right) */}
           <ResizablePanelGroup direction="horizontal">
-            
+
             {/* LEFT PANEL: The 3D/Street Viewer + Image Gallery */}
             <ResizablePanel defaultSize={75}>
               <div className="flex-1 h-full">
                 {sceneViewMode === 'glb-only' ? (
                   glbOnlyPath ? (
-                    <div className="relative h-full w-full"> 
+                    <div className="relative h-full w-full">
                       <ViewerTools
                         toolMode={toolMode}
                         onSetToolMode={setToolMode}
@@ -303,11 +563,11 @@ function App() {
                         onRedo={handleRedo}
                         onClearMeasurements={handleClearMeasurements}
                       />
-                      <GLBViewer 
-                        ref={glbViewerRef} 
+                      <GLBViewer
+                        ref={glbViewerRef}
                         glbPath={glbOnlyPath}
-                        toolMode={toolMode} 
-                        modelOrientation={modelOrientation} 
+                        toolMode={toolMode}
+                        modelOrientation={modelOrientation}
                         pointSize={pointSize}
                         measurementPoints={measurementPoints}
                         onPointFound={handlePointFound}
@@ -385,9 +645,9 @@ function App() {
                         </Button>
                       </div>
                     </ResizablePanel>
-                    
+
                     <ResizableHandle />
-                    
+
                     <ResizablePanel defaultSize={30} minSize={20}>
                       <ImageGallery
                         scenePath={selectedScene}
@@ -403,12 +663,40 @@ function App() {
 
             <ResizableHandle />
 
-            {/* RIGHT PANEL: Chat Interface */}
+            {/* RIGHT PANEL: Split into two sections */}
             <ResizablePanel defaultSize={25} minSize={20} maxSize={40}>
-                <div className="h-full border-l border-border bg-sidebar">
+              <ResizablePanelGroup direction="vertical" className="h-full">
+
+                {/* TOP HALF: existing chat */}
+                <ResizablePanel defaultSize={40} minSize={20}>
+                  <div className="h-full border-l border-border bg-sidebar">
                     <ChatInterface onCommand={handleViewerCommand} />
-                </div>
+                  </div>
+                </ResizablePanel>
+
+                <ResizableHandle />
+
+                {/* BOTTOM HALF: Report page */}
+                <ResizablePanel defaultSize={60} minSize={20}>
+                  <div className="h-full border-l border-b border-border bg-sidebar">
+                    <div className="h-full">
+                      <ReportPage
+                        measurements={measurements}
+                        currentMeasurement={currentMeasurement}
+                        canSave={canSaveMeasurement}
+                        onSaveMeasurement={handleSaveMeasurement}
+                        hasScene={Boolean(selectedScene)}
+                        onSelectMeasurement={handleMeasurementSelect}
+                        onDeleteMeasurement={handleMeasurementDelete}
+                        onRenameMeasurement={handleMeasurementRename}
+                      />
+                    </div>
+                  </div>
+                </ResizablePanel>
+
+              </ResizablePanelGroup>
             </ResizablePanel>
+
 
           </ResizablePanelGroup>
         </main>

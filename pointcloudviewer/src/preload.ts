@@ -83,6 +83,18 @@ contextBridge.exposeInMainWorld('electron', {
   getSceneMetadata: (scenePath: string): Promise<any | null> =>
     ipcRenderer.invoke('fs:getSceneMetadata', scenePath),
 
+  loadMeasurements: (scenePath: string): Promise<any[] | null> =>
+    ipcRenderer.invoke('fs:loadMeasurements', scenePath),
+
+  saveMeasurements: (scenePath: string, measurements: any[]): Promise<string | null> =>
+    ipcRenderer.invoke('fs:saveMeasurements', scenePath, measurements),
+
+  saveMeasurementSnapshot: (scenePath: string, measurementId: string, dataUrl: string): Promise<string | null> =>
+    ipcRenderer.invoke('fs:saveMeasurementSnapshot', scenePath, measurementId, dataUrl),
+
+  deleteMeasurementSnapshot: (scenePath: string, measurementId: string): Promise<boolean> =>
+    ipcRenderer.invoke('fs:deleteMeasurementSnapshot', scenePath, measurementId),
+
   readFileBuffer: (filePath: string): Promise<ArrayBuffer | null> =>
     ipcRenderer.invoke('fs:readFileBuffer', filePath),
 
