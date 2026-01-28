@@ -676,12 +676,6 @@ function App() {
 
             <ResizableHandle />
 
-            {/* RIGHT PANEL: Chat only (stream is now floating)
-            <ResizablePanel defaultSize={25} minSize={20} maxSize={40}>
-              <div className="h-full border-l border-border bg-sidebar">
-                <ChatInterface onCommand={handleViewerCommand} />
-              </div>
-            </ResizablePanel> */}
             {/* RIGHT PANEL: Split into two sections */}
             <ResizablePanel defaultSize={25} minSize={20} maxSize={40}>
               <ResizablePanelGroup direction="vertical" className="h-full">
