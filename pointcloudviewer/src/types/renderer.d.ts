@@ -80,6 +80,10 @@ interface ElectronAPI {
   getSceneGraphPath: (scenePath: string) => Promise<string | null>;
   readSceneGraph: (sceneGraphPath: string) => Promise<SceneGraph | null>;
   getSceneMetadata: (scenePath: string) => Promise<any | null>;
+  loadMeasurements: (scenePath: string) => Promise<any[] | null>;
+  saveMeasurements: (scenePath: string, measurements: any[]) => Promise<string | null>;
+  saveMeasurementSnapshot: (scenePath: string, measurementId: string, dataUrl: string) => Promise<string | null>;
+  deleteMeasurementSnapshot: (scenePath: string, measurementId: string) => Promise<boolean>;
   readFileBuffer: (filePath: string) => Promise<ArrayBuffer | null>;
   getAppPath: () => Promise<string>;
   pathJoin: (...parts: string[]) => Promise<string>;
