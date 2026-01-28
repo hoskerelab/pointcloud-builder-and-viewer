@@ -84,6 +84,22 @@ interface ElectronAPI {
   getAppPath: () => Promise<string>;
   pathJoin: (...parts: string[]) => Promise<string>;
   sendChatMessage: (message: string, endpoint?: string) => Promise<ChatResponse>;
+  runSegmentation: (
+    prompt: string,
+    scenePath: string | null
+  ) => Promise<{ ok: boolean; outputDir?: string; images?: string[]; error?: string }>;
+  listSegmentations: (
+    scenePath: string | null
+  ) => Promise<{ ok: boolean; tabs?: { label: string; images: string[] }[]; error?: string }>;
+  deleteSegmentation: (
+    scenePath: string | null,
+    label: string
+  ) => Promise<{ ok: boolean; error?: string }>;
+  getThumbnail: (
+    imagePath: string,
+    scenePath: string | null,
+    maxSize?: number
+  ) => Promise<{ ok: boolean; thumbnailPath?: string; error?: string }>;
 }
 
 declare global {

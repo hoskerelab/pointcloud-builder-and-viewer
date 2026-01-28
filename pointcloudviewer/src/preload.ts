@@ -95,4 +95,24 @@ contextBridge.exposeInMainWorld('electron', {
   // Chat API
   sendChatMessage: (message: string, endpoint?: string): Promise<any> =>
     ipcRenderer.invoke('chat:sendMessage', message, endpoint),
+  runSegmentation: (
+    prompt: string,
+    scenePath: string | null
+  ): Promise<{ ok: boolean; outputDir?: string; images?: string[]; error?: string }> =>
+    ipcRenderer.invoke('segmentation:run', prompt, scenePath),
+  listSegmentations: (
+    scenePath: string | null
+  ): Promise<{ ok: boolean; tabs?: { label: string; images: string[] }[]; error?: string }> =>
+    ipcRenderer.invoke('segmentation:list', scenePath),
+  deleteSegmentation: (
+    scenePath: string | null,
+    label: string
+  ): Promise<{ ok: boolean; error?: string }> =>
+    ipcRenderer.invoke('segmentation:delete', scenePath, label),
+  getThumbnail: (
+    imagePath: string,
+    scenePath: string | null,
+    maxSize?: number
+  ): Promise<{ ok: boolean; thumbnailPath?: string; error?: string }> =>
+    ipcRenderer.invoke('thumbnail:get', imagePath, scenePath, maxSize),
 });
