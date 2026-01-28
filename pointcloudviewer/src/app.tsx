@@ -10,10 +10,11 @@ import { StreetViewer } from "@/components/StreetViewer"
 import type { GLBViewerControls } from "@/src/contexts/ViewerContext"
 import { useSceneData } from "@/hooks/useSceneData"
 import type { SceneCamera, SceneImage } from "@/src/types/scene"
-import { FolderOpen, Box, Map, Eye } from 'lucide-react'
+import { FolderOpen, Box, Map, Eye, Video } from 'lucide-react'
 import { ViewerTools } from '@/components/ViewerTools'; // Viewer toolbar
 import * as THREE from 'three'; // Import THREE for Euler
 import { ChatInterface, ViewerCommand } from "@/components/ChatInterface"
+import { RtspFloatingWidget } from "@/components/RtspFloatingWidget";
 import { RtspPanel } from "@/components/RtspPanel";
 import { ReportPage } from '@/components/ReportPage'
 import type { CurrentMeasurement, Measurement } from "@/src/types/measurement";
@@ -45,6 +46,7 @@ function App() {
   const { data: sceneData, loading: sceneDataLoading, error: sceneDataError } = useSceneData(scenePathForData);
   const [selectedCameraIndex, setSelectedCameraIndex] = useState<number | null>(null);
   const [highlightedImageIndex, setHighlightedImageIndex] = useState<number | null>(null);
+  const [showRtsp, setShowRtsp] = useState(false);
   const currentImage = useMemo(() => {
     if (!sceneData) return null;
     return sceneData.images.find((img) => img.index === highlightedImageIndex)
@@ -522,6 +524,16 @@ function App() {
                 <Box className="size-sidebar-icon" />
                 <span className="sr-only">Open GLB File</span>
               </Button>
+              <Button
+                onClick={() => setShowRtsp((prev) => !prev)}
+                variant="ghost"
+                size="icon"
+                className="size-sidebar-icon hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+                aria-pressed={showRtsp}
+              >
+                <Video className="size-sidebar-icon" />
+                <span className="sr-only">Toggle Live Stream</span>
+              </Button>
             </>
           }
         >
@@ -664,6 +676,12 @@ function App() {
 
             <ResizableHandle />
 
+            {/* RIGHT PANEL: Chat only (stream is now floating)
+            <ResizablePanel defaultSize={25} minSize={20} maxSize={40}>
+              <div className="h-full border-l border-border bg-sidebar">
+                <ChatInterface onCommand={handleViewerCommand} />
+              </div>
+            </ResizablePanel> */}
             {/* RIGHT PANEL: Split into two sections */}
             <ResizablePanel defaultSize={25} minSize={20} maxSize={40}>
               <ResizablePanelGroup direction="vertical" className="h-full">
@@ -701,6 +719,7 @@ function App() {
 
           </ResizablePanelGroup>
         </main>
+        {showRtsp && <RtspFloatingWidget />}
       </div>
     </SidebarProvider>
   );
@@ -847,3 +866,4 @@ root.render(<App />);
           </div>
         </main>
 */
+

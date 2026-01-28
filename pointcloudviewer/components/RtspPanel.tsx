@@ -85,7 +85,7 @@ export function RtspPanel() {
         {frameUrl ? (
           <img
             src={frameUrl}
-            className="w-full h-full object-contain"
+            className="block h-full w-full object-contain"
             alt="RTSP stream"
             onLoad={() => console.log("[RtspPanel] loaded frame")}
             onError={() => console.error("[RtspPanel] FAILED frame")}
