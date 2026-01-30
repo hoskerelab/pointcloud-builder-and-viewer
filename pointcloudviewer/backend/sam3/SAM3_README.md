@@ -33,8 +33,8 @@ cd sam3
 ```
 
 ### 2) Download model files
-Download `model.safetensors` and `sam3.pt` from:
-`https://drive.google.com/drive/folders/1yjOR4jXehbSQQsE4FFwDzK2k7V1_XvAJ?usp=sharing`
+Download `model.safetensors` , `sam3.pt`and few dewpendent fiels from:
+`https://drive.google.com/drive/folders/1yjOR4jXehbSQQsE4FFwDzK2k7V1_XvAJ?usp=sharing`  
 
 Place both files in:
 `sam3\sam3`
