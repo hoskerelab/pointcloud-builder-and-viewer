@@ -21,7 +21,7 @@ function Model({ url }: { url: string }) {
   if (isPLY && geometry) {
     return (
       <points geometry={geometry}>
-        <pointsMaterial vertexColors size={0.007} />
+		<pointsMaterial vertexColors size={1} sizeAttenuation={false} />
       </points>
     );
   }

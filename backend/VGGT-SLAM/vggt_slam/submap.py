@@ -19,6 +19,7 @@ class Submap:
         self.conf_masks = None # (S, H, W)
         self.conf_threshold = None
         self.pointclouds = None # (S, H, W, 3)
+        self.depth_paths = None  # Optional list of depth map paths aligned with frames
         self.voxelized_points = None
         self.last_non_loop_frame_index = None
         self.frame_ids = None
@@ -35,6 +36,9 @@ class Submap:
             
     def add_all_frames(self, frames):
         self.frames = frames
+
+    def set_depth_paths(self, depth_paths):
+        self.depth_paths = list(depth_paths)
     
     def add_all_retrieval_vectors(self, retrieval_vectors):
         self.retrieval_vectors = retrieval_vectors

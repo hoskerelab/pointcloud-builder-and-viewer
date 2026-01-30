@@ -1,3 +1,4 @@
+import os
 import numpy as np
 import cv2
 import gtsam
@@ -178,6 +179,9 @@ class Solver:
         self.vis_stride = vis_stride
         self.vis_point_size = vis_point_size
 
+        # Store per-frame depth scale samples when captured depth is available
+        self.depth_scale_samples = []
+
         # print("Starting viser server...")
 
     def set_point_cloud(self, points_in_world_frame, points_colors, name, point_size):
@@ -224,7 +228,7 @@ class Solver:
         self.set_submap_point_cloud(submap)
         self.set_submap_poses(submap)
 
-    def add_points(self, pred_dict):
+    def add_points(self, pred_dict, depth_paths=None):
         """
         Args:
             pred_dict (dict):
@@ -263,6 +267,72 @@ class Solver:
         # Flatten
         cam_to_world = closed_form_inverse_se3(extrinsics_cam)  # shape (S, 4, 4)
 
+        # If depth paths are provided, accumulate per-frame depth ratios
+        # between captured depth and predicted depth, and store the depth
+        # paths on the current submap for later refinement at the map
+        # level (GraphMap.refine_points_with_depth).
+        if depth_paths is not None and len(depth_paths) > 0:
+            S = world_points.shape[0]
+            depth_map = pred_dict.get("depth")
+            Hp, Wp = world_points.shape[1:3]
+            ratios_all = []
+            for i in range(S):
+                if i >= len(depth_paths):
+                    break
+                depth_path = depth_paths[i]
+                if depth_path is None or (not os.path.exists(depth_path)):
+                    continue
+                try:
+                    captured_mm = np.load(depth_path)
+                except Exception:
+                    continue
+
+                if captured_mm.ndim > 2:
+                    captured_mm = np.squeeze(captured_mm)
+                if captured_mm.ndim != 2:
+                    continue
+
+                # Resize captured depth to match network / world_points
+                if captured_mm.shape != (Hp, Wp):
+                    captured_mm_resized = cv2.resize(
+                        captured_mm,
+                        (Wp, Hp),
+                        interpolation=cv2.INTER_NEAREST,
+                    )
+                else:
+                    captured_mm_resized = captured_mm
+
+                # Predicted depth either from network or geometric depth
+                if depth_map is not None:
+                    pred_depth = depth_map[i, :Hp, :Wp, 0]
+                else:
+                    cam_center = cam_to_world[i, 0:3, 3]
+                    pts = world_points[i, :Hp, :Wp, :]
+                    pred_depth = np.linalg.norm(pts - cam_center.reshape(1, 1, 3), axis=-1)
+
+                cap_mm = captured_mm_resized.astype(np.float64)
+                # Use only valid metric depths in a plausible range
+                valid_mask = (cap_mm > 0) & (cap_mm < 8300) & np.isfinite(pred_depth) & (pred_depth > 1e-6)
+                if not np.any(valid_mask):
+                    continue
+
+                cap_valid_mm = cap_mm[valid_mask]
+                pred_valid = pred_depth[valid_mask].astype(np.float64)
+
+                ratios_i = cap_valid_mm / pred_valid
+                if ratios_i.size > 0:
+                    if ratios_i.size > 5000:
+                        idx = np.random.choice(ratios_i.size, 5000, replace=False)
+                        ratios_i = ratios_i[idx]
+                    ratios_all.append(ratios_i)
+
+            if ratios_all:
+                self.depth_scale_samples.extend(ratios_all)
+
+            # Keep the depth paths for map-level refinement later.
+            if hasattr(self.current_working_submap, "set_depth_paths"):
+                self.current_working_submap.set_depth_paths(depth_paths)
+
         # estimate focal length from points
         points_in_first_cam = world_points[0,...]
         h, w = points_in_first_cam.shape[0:2]
@@ -295,7 +365,27 @@ class Solver:
                 T_temp[0:3,0:3] = R_temp
                 T_temp[0:3,3] = t_temp
                 T_temp = np.linalg.inv(T_temp)
-                scale_factor = np.mean(np.linalg.norm((T_temp[0:3,0:3] @ self.prior_pcd[good_mask].T).T + T_temp[0:3,3], axis=1) / np.linalg.norm(current_pts[good_mask], axis=1))
+
+                # Compute scale factor
+                if np.any(good_mask):
+                    num = np.linalg.norm((T_temp[0:3,0:3] @ self.prior_pcd[good_mask].T).T + T_temp[0:3,3], axis=1)
+                    den = np.linalg.norm(current_pts[good_mask], axis=1)
+                    valid = (den > 1e-6) & np.isfinite(num) & np.isfinite(den)
+                    if np.any(valid):
+                        scale_vals = num[valid] / den[valid]
+                        scale_vals = scale_vals[np.isfinite(scale_vals)]
+                        if scale_vals.size > 0:
+                            scale_factor = float(np.mean(scale_vals))
+                        else:
+                            scale_factor = 1.0
+                    else:
+                        scale_factor = 1.0
+                else:
+                    scale_factor = 1.0
+
+                if not np.isfinite(scale_factor) or scale_factor <= 0:
+                    scale_factor = 1.0
+
                 print(colored("scale factor", 'green'), scale_factor)
                 H_relative = np.eye(4)
                 H_relative[0:3,0:3] = R_temp
@@ -396,6 +486,21 @@ class Solver:
         # Stack to create an (n,2) tensor
         pixel_coords = torch.stack((y_coords, x_coords), dim=1)
         return pixel_coords
+
+    def get_global_depth_scale(self):
+        """Compute a single global depth scale from all accumulated samples.
+
+        Returns:
+            float or None: median scale factor mapping predicted depth to metric,
+            or None if no valid samples were collected.
+        """
+        if not self.depth_scale_samples:
+            return None
+
+        all_ratios = np.concatenate(self.depth_scale_samples)
+        if all_ratios.size == 0:
+            return None
+        return float(np.median(all_ratios))
 
     def run_predictions(self, image_names, model, max_loops):
         device = "cuda" if torch.cuda.is_available() else "cpu"

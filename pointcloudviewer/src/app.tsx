@@ -38,19 +38,21 @@ function App() {
   const [viewMode, setViewMode] = useState<'scene' | 'glb-only'>('glb-only');
   const [glbOnlyPath, setGlbOnlyPath] = useState<string | null>(null);
   const [uploadedGlbs, setUploadedGlbs] = useState<string[]>([]); // List of uploaded GLB URLs
+  const [uploadedPlyPaths, setUploadedPlyPaths] = useState<string[]>([]); // Temp file paths for received PLYs
   const [isUploading, setIsUploading] = useState(false);
   const [serverError, setServerError] = useState<string | null>(null);
-  const [cameraDevices, setCameraDevices] = useState<MediaDeviceInfo[]>([]);
-  const [selectedCamera, setSelectedCamera] = useState<string | null>(null);
-  const [cameraStream, setCameraStream] = useState<MediaStream | null>(null);
-  const videoRef = useRef<HTMLVideoElement>(null);
-  const [isRecording, setIsRecording] = useState(false);
-  const recordingIntervalRef = useRef<NodeJS.Timeout | null>(null);
-  const wsRef = useRef<WebSocket | null>(null);
+  const [useDepthMaps, setUseDepthMaps] = useState(false);
+
+  // Live capture previews (from Python bridge)
+  const [captureMode, setCaptureMode] = useState<'idle' | 'gopro' | 'gopro_helios'>('idle');
+  const [captureState, setCaptureState] = useState<'idle' | 'preview' | 'recording'>('idle');
+  const [rgbPreview, setRgbPreview] = useState<string | null>(null);
+  const [depthPreview, setDepthPreview] = useState<string | null>(null);
 
   // Refs for viewer controls
   const glbViewerRef = useRef<GLBViewerControls>(null);
   const sceneGraphViewerRef = useRef<SceneGraphViewerControls>(null);
+  const submapsWsRef = useRef<WebSocket | null>(null);
 
   // Force dark mode
   useEffect(() => {
@@ -113,18 +115,89 @@ function App() {
     openDownloads();
   }, []);
 
-  // Enumerate camera devices on mount
+
+  // Subscribe to preview frames from live capture bridge
   useEffect(() => {
-    const getCameraDevices = async () => {
-      try {
-        const devices = await navigator.mediaDevices.enumerateDevices();
-        const videoDevices = devices.filter(device => device.kind === 'videoinput');
-        setCameraDevices(videoDevices);
-      } catch (error) {
-        console.error('Error enumerating devices:', error);
+    if (!window.electron.onCaptureFrame) return;
+
+    window.electron.onCaptureFrame((msg: any) => {
+      if (!msg || typeof msg !== 'object') return;
+      if (msg.type === 'rgb' && msg.jpeg_b64) {
+        setRgbPreview(`data:image/jpeg;base64,${msg.jpeg_b64}`);
+      } else if (msg.type === 'rgbd') {
+        if (msg.rgb_jpeg_b64) {
+          setRgbPreview(`data:image/jpeg;base64,${msg.rgb_jpeg_b64}`);
+        }
+        if (msg.depth_jpeg_b64) {
+          setDepthPreview(`data:image/jpeg;base64,${msg.depth_jpeg_b64}`);
+        }
       }
+    });
+  }, []);
+
+  // Subscribe to submap point clouds from backend broadcast websocket
+  useEffect(() => {
+    const backendUrl = 'ws://localhost:8000';
+    try {
+      const ws = new WebSocket(`${backendUrl}/ws/submaps`);
+      ws.binaryType = 'blob';
+      submapsWsRef.current = ws;
+
+      ws.onopen = () => {
+        console.log('Submaps WebSocket connection opened');
+      };
+
+      ws.onmessage = async (event) => {
+        if (event.data instanceof Blob) {
+          const plyBlob = event.data;
+          try {
+            const buffer = await plyBlob.arrayBuffer();
+            const tempPath = await window.electron.saveTempPLY(buffer);
+            if (!tempPath) {
+              console.error('Failed to save temp PLY file from /ws/submaps');
+              return;
+            }
+            const fileUrl = `file://${tempPath}`;
+            setUploadedPlyPaths(prev => [...prev, tempPath]);
+            setUploadedGlbs(prev => [...prev, fileUrl]);
+            setGlbOnlyPath(fileUrl);
+            setViewMode('glb-only');
+            console.log('Received PLY file from /ws/submaps, saved to', tempPath);
+          } catch (err) {
+            console.error('Error handling received PLY file from /ws/submaps:', err);
+          }
+        } else if (typeof event.data === 'string') {
+          if (event.data.startsWith('filename:')) {
+            const filename = event.data.split(':')[1];
+            console.log('Received submap filename:', filename);
+          } else if (event.data.startsWith('status:')) {
+            console.log('Submap status:', event.data);
+          } else {
+            console.log('Submaps WS message:', event.data);
+          }
+        }
+      };
+
+      ws.onclose = (ev) => {
+        console.log('Submaps WebSocket closed, code=', ev.code, 'reason=', ev.reason, 'wasClean=', ev.wasClean);
+        if (submapsWsRef.current === ws) {
+          submapsWsRef.current = null;
+        }
+      };
+
+      ws.onerror = (event) => {
+        console.error('Submaps WebSocket encountered an error event:', event);
+      };
+    } catch (err) {
+      console.error('Failed to open Submaps WebSocket:', err);
+    }
+
+    return () => {
+      if (submapsWsRef.current && submapsWsRef.current.readyState === WebSocket.OPEN) {
+        submapsWsRef.current.close();
+      }
+      submapsWsRef.current = null;
     };
-    getCameraDevices();
   }, []);
 
   const handleOpenFolder = async () => {
@@ -172,127 +245,22 @@ function App() {
     console.log('Selected scene:', path);
   };
 
-  const handleCameraChange = async (e: React.ChangeEvent<HTMLSelectElement>) => {
-    const deviceId = e.target.value;
-    if (deviceId) {
-      // Stop previous stream
-      if (cameraStream) {
-        cameraStream.getTracks().forEach(track => track.stop());
-      }
-      setSelectedCamera(deviceId);
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: { deviceId: { exact: deviceId }, width: { ideal: 1280 }, height: { ideal: 720 } }
-        });
-        setCameraStream(stream);
-        if (videoRef.current) {
-          videoRef.current.srcObject = stream;
-        }
-      } catch (error) {
-        console.error('Error accessing camera:', error);
-        alert('Error accessing camera.');
-      }
-    }
-  };
-
   const handleStartRecording = () => {
-    if (!cameraStream || !videoRef.current) {
-      alert('No camera selected.');
-      return;
-    }
-    setIsRecording(true);
-    const backendUrl = 'ws://localhost:8000'; // WebSocket URL
-    const ws = new WebSocket(`${backendUrl}/ws/upload`);
-
-    ws.onopen = () => {
-      console.log('WebSocket opened for recording');
-      wsRef.current = ws;
-      recordingIntervalRef.current = setInterval(() => {
-        if (videoRef.current && ws.readyState === WebSocket.OPEN) {
-          const canvas = document.createElement('canvas');
-          const ctx = canvas.getContext('2d');
-          if (ctx) {
-            canvas.width = videoRef.current.videoWidth;
-            canvas.height = videoRef.current.videoHeight;
-            ctx.drawImage(videoRef.current, 0, 0);
-            canvas.toBlob((blob) => {
-              if (blob) {
-                ws.send(blob);
-                console.log('Sent frame');
-              }
-            }, 'image/png');
-          }
-        }
-      }, 300); // 2 images per second = 500ms interval
-    };
-
-    ws.onmessage = (event) => {
-      if (event.data instanceof Blob) {
-        // Received PLY file data
-        const plyUrl = URL.createObjectURL(event.data);
-        setUploadedGlbs(prev => [...prev, plyUrl]);
-        setGlbOnlyPath(plyUrl); // Automatically set to display the new PLY
-        setViewMode('glb-only'); // Switch to glb-only mode
-        console.log('Received PLY file');
-      } else if (typeof event.data === 'string') {
-        // Server sends textual messages in the form of prefix:value
-        if (event.data.startsWith('filename:')) {
-          const filename = event.data.split(':')[1];
-          console.log('Received filename:', filename);
-        } else if (event.data.startsWith('error:')) {
-          // Detailed server-side error message. Store it so UI can display.
-          const detail = event.data.slice('error:'.length);
-          setServerError(detail);
-          console.error('Server error:', detail);
-        } else if (event.data === 'ping') {
-          // Respond to keepalive ping
-          try { ws.send('pong'); } catch (e) { /* ignore */ }
-        } else if (event.data.startsWith('status:')) {
-          // Processing status update
-          console.log('Processing status:', event.data);
-        } else {
-          // Unrecognized text message
-          console.log('WS message:', event.data);
-        }
-      }
-    };
-
-    ws.onclose = () => {
-      console.log('WebSocket closed for recording');
-      setIsRecording(false);
-      if (recordingIntervalRef.current) {
-        clearInterval(recordingIntervalRef.current);
-        recordingIntervalRef.current = null;
-      }
-    };
-
-    ws.onerror = (error) => {
-      console.error('WebSocket error:', error);
-      setIsRecording(false);
-      if (recordingIntervalRef.current) {
-        clearInterval(recordingIntervalRef.current);
-        recordingIntervalRef.current = null;
-      }
-    };
+    // Deprecated: live capture is handled by Python bridge now.
+    alert('Use GoPro / GoPro + Helios2 buttons for live capture.');
   };
 
   const handleStopRecording = () => {
-    if (recordingIntervalRef.current) {
-      clearInterval(recordingIntervalRef.current);
-      recordingIntervalRef.current = null;
-    }
-    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      wsRef.current.send("done");
-      console.log('Sent done');
-    }
-    setIsRecording(false);
+    // Deprecated: live capture stop is handled via stopLiveCapture.
+    alert('Use Stop Capture in the live capture section.');
   };
 
   const handleUploadImages = async () => {
     const input = document.createElement('input');
     input.type = 'file';
     input.multiple = true;
-    input.accept = 'image/*';
+    // Allow both RGB images and optional depth .npy files
+    input.accept = 'image/*,.npy';
     input.onchange = async (e) => {
       const files = (e.target as HTMLInputElement).files;
       if (!files || files.length === 0) return;
@@ -311,23 +279,85 @@ function App() {
 
       ws.onopen = async () => {
         console.log('WebSocket connection opened');
-        // Send all images over WebSocket sequentially with small delays
-        for (let i = 0; i < files.length; i++) {
-          const file = files[i];
+
+        // If requested, inform the backend that this session will include
+        // paired raw depth maps that need projection onto RGB.
+        if (useDepthMaps) {
           try {
-            const buffer = await file.arrayBuffer();
-            ws.send(buffer);
-            imagesSent++;
-            console.log(`Sent image ${imagesSent}/${totalImages}`);
-            // Small delay between sends to prevent overwhelming the backend
-            await new Promise(resolve => setTimeout(resolve, 400));
-          } catch (error) {
-            console.error(`Error sending image ${i}:`, error);
+            ws.send('config:use_raw_depth:1');
+          } catch (err) {
+            console.error('Failed to send depth config:', err);
           }
         }
-        // Inform server that we are done sending images so it can flush any remaining partial batch
+
+        if (!useDepthMaps) {
+          // Original behavior: send all images sequentially.
+          for (let i = 0; i < files.length; i++) {
+            const file = files[i];
+            try {
+              if (!file.type.startsWith('image/')) continue;
+              const buffer = await file.arrayBuffer();
+              ws.send(buffer);
+              imagesSent++;
+              console.log(`Sent image ${imagesSent}/${totalImages}`);
+              await new Promise(resolve => setTimeout(resolve, 400));
+            } catch (error) {
+              console.error(`Error sending image ${i}:`, error);
+            }
+          }
+        } else {
+          // Depth-enabled mode: pair RGB images with matching .npy depth maps
+          type Pair = { rgb?: File; depth?: File };
+          const pairs: Record<string, Pair> = {};
+
+          for (let i = 0; i < files.length; i++) {
+            const file = files[i];
+            const name = file.name.toLowerCase();
+            const match = name.match(/\d+/);
+            if (!match) continue;
+            const key = match[0];
+
+            if (!pairs[key]) pairs[key] = {};
+
+            if (file.type.startsWith('image/')) {
+              pairs[key].rgb = file;
+            } else if (name.endsWith('.npy')) {
+              pairs[key].depth = file;
+            }
+          }
+
+          const keys = Object.keys(pairs).sort((a, b) => Number(a) - Number(b));
+
+          for (const key of keys) {
+            const pair = pairs[key];
+            if (!pair.rgb) {
+              console.warn(`Skipping frame ${key}: missing RGB image`);
+              continue;
+            }
+            try {
+              const rgbBuffer = await pair.rgb.arrayBuffer();
+              ws.send(rgbBuffer);
+              imagesSent++;
+              console.log(`Sent RGB for frame ${key} (${imagesSent}/${totalImages})`);
+
+              if (pair.depth) {
+                const depthBuffer = await pair.depth.arrayBuffer();
+                ws.send(depthBuffer);
+                console.log(`Sent depth for frame ${key}`);
+              } else {
+                console.warn(`No depth map for frame ${key}`);
+              }
+
+              await new Promise(resolve => setTimeout(resolve, 400));
+            } catch (error) {
+              console.error(`Error sending data for frame ${key}:`, error);
+            }
+          }
+        }
+
+        // Inform server that we are done sending so it can flush any remaining batches
         try {
-          ws.send("done");
+          ws.send('done');
           console.log('Sent done');
         } catch (error) {
           console.error('Error sending done:', error);
@@ -335,14 +365,10 @@ function App() {
         // Don't close here - let the server close after processing
       };
 
-      ws.onmessage = (event) => {
+      ws.onmessage = async (event) => {
         if (event.data instanceof Blob) {
-          // Received PLY file data
-          const plyUrl = URL.createObjectURL(event.data);
-          setUploadedGlbs(prev => [...prev, plyUrl]);
-          setGlbOnlyPath(plyUrl); // Automatically set to display the new PLY
-          setViewMode('glb-only'); // Switch to glb-only mode
-          console.log('Received PLY file');
+          // For uploads, point clouds are now delivered via /ws/submaps.
+          console.log('Received binary data on upload WebSocket (ignored; using /ws/submaps)');
         } else if (typeof event.data === 'string') {
           // Server sends textual messages in the form of prefix:value
           if (event.data.startsWith('filename:')) {
@@ -459,6 +485,41 @@ function App() {
     }
   };
 
+  const handleDownloadAllSubmaps = async () => {
+    if (uploadedPlyPaths.length === 0) {
+      return;
+    }
+    try {
+      const outDir = await window.electron.exportSubmaps?.(uploadedPlyPaths);
+      if (outDir) {
+        console.log('Exported submaps to', outDir);
+      }
+    } catch (error) {
+      console.error('Failed to export submaps:', error);
+    }
+  };
+
+  const handleSaveMergedPointCloud = async () => {
+    try {
+      const response = await fetch('http://localhost:8000/export_merged_ply');
+      if (!response.ok) {
+        console.error('Failed to fetch merged PLY:', response.status, response.statusText);
+        return;
+      }
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'merged_pointcloud.ply';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error('Failed to download merged PLY:', error);
+    }
+  };
+
   return (
     <SidebarProvider defaultOpen={true}>
       <div className="dark bg-background text-foreground h-screen w-full flex overflow-hidden">
@@ -503,26 +564,90 @@ function App() {
         >
           <SidebarContent>
             <SidebarGroup>
-              <SidebarGroupLabel>Camera</SidebarGroupLabel>
+              <SidebarGroupLabel>Live Capture</SidebarGroupLabel>
               <SidebarGroupContent>
-                <select onChange={handleCameraChange} className="w-full p-2 border rounded text-black bg-white">
-                  <option value="">Select Camera</option>
-                  {cameraDevices.map((device, index) => (
-                    <option key={device.deviceId} value={device.deviceId}>
-                      {device.label || `Camera ${index + 1}`}
-                    </option>
-                  ))}
-                </select>
-                <div className="mt-2">
-                  <video ref={videoRef} className="w-full h-48 bg-black rounded" autoPlay muted />
+                <div className="flex gap-2 mb-2">
+                  <Button
+                    onClick={() => {
+                      setCaptureMode('gopro');
+                    }}
+                    variant={captureMode === 'gopro' ? 'default' : 'ghost'}
+                    className="flex-1"
+                  >
+                    GoPro (RGB)
+                  </Button>
+                  <Button
+                    onClick={() => {
+                      setCaptureMode('gopro_helios');
+                    }}
+                    variant={captureMode === 'gopro_helios' ? 'default' : 'ghost'}
+                    className="flex-1"
+                  >
+                    GoPro + Helios2
+                  </Button>
                 </div>
-                <div className="mt-2 flex gap-2">
-                  <Button onClick={handleStartRecording} disabled={isRecording} variant="ghost" className="flex-1">
+                <div className="flex gap-2 mb-2">
+                  <Button
+                    onClick={async () => {
+                      if (captureMode === 'idle') return;
+                      await window.electron.stopLiveCapture?.();
+                      await window.electron.startLiveCapture?.(captureMode as 'gopro' | 'gopro_helios', true);
+                      setCaptureState('preview');
+                    }}
+                    variant={captureState === 'preview' ? 'default' : 'ghost'}
+                    className="flex-1"
+                    disabled={captureMode === 'idle'}
+                  >
+                    Start Stream
+                  </Button>
+                  <Button
+                    onClick={async () => {
+                      if (captureMode === 'idle') return;
+                      await window.electron.stopLiveCapture?.();
+                      await window.electron.startLiveCapture?.(captureMode as 'gopro' | 'gopro_helios', false);
+                      setCaptureState('recording');
+                    }}
+                    variant={captureState === 'recording' ? 'default' : 'ghost'}
+                    className="flex-1"
+                    disabled={captureMode === 'idle'}
+                  >
                     Start Recording
                   </Button>
-                  <Button onClick={handleStopRecording} disabled={!isRecording} variant="ghost" className="flex-1">
-                    Stop Recording
+                </div>
+                {rgbPreview && (
+                  <img
+                    src={rgbPreview}
+                    className="w-full h-40 object-contain bg-black rounded mb-2"
+                  />
+                )}
+                {captureMode === 'gopro_helios' && depthPreview && (
+                  <img
+                    src={depthPreview}
+                    className="w-full h-40 object-contain bg-black rounded mb-2"
+                  />
+                )}
+                <div className="mt-2 flex gap-2">
+                  <Button
+                    onClick={async () => {
+                      await window.electron.stopLiveCapture?.();
+                      setCaptureState('idle');
+                    }}
+                    variant="ghost"
+                    className="flex-1"
+                  >
+                    Stop Capture
                   </Button>
+                </div>
+                <div className="mt-2 flex items-center gap-2">
+                  <input
+                    id="use-depth-maps"
+                    type="checkbox"
+                    checked={useDepthMaps}
+                    onChange={e => setUseDepthMaps(e.target.checked)}
+                  />
+                  <label htmlFor="use-depth-maps" className="text-sm">
+                    Use depth maps (folder upload)
+                  </label>
                 </div>
               </SidebarGroupContent>
             </SidebarGroup>
@@ -535,7 +660,29 @@ function App() {
             {viewMode === 'glb-only' ? (
               // GLB-only mode: Full-screen 3D viewer
               glbOnlyPath ? (
-                <GLBViewer ref={glbViewerRef} filePath={glbOnlyPath} uploadedGlbs={uploadedGlbs} />
+                <div className="relative h-full w-full">
+                  <div className="absolute top-2 left-2 z-10 flex gap-2 bg-background/80 backdrop-blur-sm border border-border rounded-md p-1 shadow-md">
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      disabled={uploadedPlyPaths.length === 0}
+                      onClick={handleDownloadAllSubmaps}
+                      className="text-xs"
+                    >
+                      Save submaps
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      disabled={uploadedGlbs.length === 0}
+                      onClick={handleSaveMergedPointCloud}
+                      className="text-xs"
+                    >
+                      Save merged
+                    </Button>
+                  </div>
+                  <GLBViewer ref={glbViewerRef} filePath={glbOnlyPath} uploadedGlbs={uploadedGlbs} />
+                </div>
               ) : (
                 <div className="flex h-full items-center justify-center">
                   <span className="text-muted-foreground">Please select a GLB file</span>

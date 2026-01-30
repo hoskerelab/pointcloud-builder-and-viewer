@@ -73,6 +73,11 @@ interface ElectronAPI {
   getSceneGraphPath: (scenePath: string) => Promise<string | null>;
   readSceneGraph: (sceneGraphPath: string) => Promise<SceneGraph | null>;
   sendChatMessage: (message: string, endpoint?: string) => Promise<ChatResponse>;
+  saveTempPLY: (data: ArrayBuffer) => Promise<string | null>;
+  exportSubmaps: (paths: string[]) => Promise<string | null>;
+  startLiveCapture: (mode: 'gopro' | 'gopro_helios', previewOnly?: boolean) => Promise<void>;
+  stopLiveCapture: () => Promise<void>;
+  onCaptureFrame: (handler: (msg: any) => void) => void;
 }
 
 declare global {

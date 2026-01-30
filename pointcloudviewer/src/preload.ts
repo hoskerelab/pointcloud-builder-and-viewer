@@ -71,4 +71,22 @@ contextBridge.exposeInMainWorld('electron', {
   // Chat API
   sendChatMessage: (message: string, endpoint?: string): Promise<any> =>
     ipcRenderer.invoke('chat:sendMessage', message, endpoint),
+
+  // Point cloud helpers
+  saveTempPLY: (data: ArrayBuffer): Promise<string | null> =>
+    ipcRenderer.invoke('fs:saveTempPLY', Buffer.from(data)),
+
+  exportSubmaps: (paths: string[]): Promise<string | null> =>
+    ipcRenderer.invoke('fs:exportSubmaps', paths),
+
+  // Live capture (GoPro / GoPro + Helios2)
+  startLiveCapture: (mode: 'gopro' | 'gopro_helios', previewOnly: boolean = false): Promise<void> =>
+    ipcRenderer.invoke('capture:start', mode, previewOnly),
+
+  stopLiveCapture: (): Promise<void> =>
+    ipcRenderer.invoke('capture:stop'),
+
+  onCaptureFrame: (handler: (msg: any) => void): void => {
+    ipcRenderer.on('capture:frame', (_event, msg) => handler(msg));
+  },
 });
