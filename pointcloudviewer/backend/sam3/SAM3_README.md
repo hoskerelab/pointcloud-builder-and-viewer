@@ -26,14 +26,20 @@ docker run --rm --gpus all nvidia/cuda:12.8.1-cudnn-runtime-ubuntu24.04 nvidia-s
 
 ## Model files + Docker build
 
-### 1) Download model files
+### 1) Clone SAM3
+```powershell
+git clone https://github.com/facebookresearch/sam3.git
+cd sam3
+```
+
+### 2) Download model files
 Download `model.safetensors` and `sam3.pt` from:
 `https://drive.google.com/drive/folders/1yjOR4jXehbSQQsE4FFwDzK2k7V1_XvAJ?usp=sharing`
 
 Place both files in:
 `sam3\sam3`
 
-### 2) Expected folder structure
+### 3) Expected folder structure
 ```
 sam3/
   Dockerfile
@@ -45,7 +51,7 @@ sam3/
       sam3.pt
 ```
 
-### 3) Build the Docker image
+### 4) Build the Docker image
 From the folder that contains the `Dockerfile`:
 ```powershell
 cd sam3
