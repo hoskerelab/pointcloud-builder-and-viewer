@@ -20,6 +20,7 @@ This repo runs `infer_folder.py` inside a CUDA-enabled Docker container using an
 Open **PowerShell** and run:
 ```powershell
 docker run --rm --gpus all nvidia/cuda:12.8.1-cudnn-runtime-ubuntu24.04 nvidia-smi
+```
 
 ---
 
@@ -30,7 +31,7 @@ Download `model.safetensors` and `sam3.pt` from:
 `https://drive.google.com/drive/folders/1yjOR4jXehbSQQsE4FFwDzK2k7V1_XvAJ?usp=sharing`
 
 Place both files in:
-`sam3\sam3\sam3`
+`sam3\sam3`
 
 ### 2) Expected folder structure
 ```
@@ -40,8 +41,8 @@ sam3/
   app/
   sam3/
     sam3/
-        model.safetensors
-        sam3.pt
+      model.safetensors
+      sam3.pt
 ```
 
 ### 3) Build the Docker image
