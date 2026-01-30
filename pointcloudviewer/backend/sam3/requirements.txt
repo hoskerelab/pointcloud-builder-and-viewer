@@ -1,0 +1,7 @@
+psutil
+numpy
+pandas
+pillow
+tqdm
+opencv-python-headless
+einops
